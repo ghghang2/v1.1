@@ -24,7 +24,7 @@ MODEL_NAME = "unsloth/gpt-oss-20b-GGUF:F16"
 DEFAULT_SYSTEM_PROMPT = "Be concise and accurate at all times"
 
 USER_NAME = "ghghang2"          # GitHub user / org name
-REPO_NAME = "v1.3"              # Repository to push to
+REPO_NAME = "v1.2"              # Repository to push to
 IGNORED_ITEMS = [
     ".*",
     "sample_data",
@@ -223,15 +223,29 @@ class RemoteClient:
             log.info("No remote configured – skipping fetch")
 
     def pull(self, rebase: bool = True) -> None:
-        """Pull the `main` branch from origin, optionally rebasing."""
+        """Pull the `main` branch from origin, optionally rebasing.
+
+        If the repo has uncommitted changes we commit them first with a
+        deterministic message.  This guarantees that ``git pull`` (with or
+        without rebase) will succeed.
+        """
         if "origin" not in self.repo.remotes:
             raise RuntimeError("No remote named 'origin' configured")
 
         branch = "main"
         log.info("Pulling %s%s…", branch, " (rebase)" if rebase else "")
+
+        # 1️⃣  Commit any dirty work
+        if self.repo.is_dirty(untracked_files=True):
+            log.info("Committing local changes before pull")
+            self.commit_all("Auto‑commit before pull")
+
+        # 2️⃣  Pull
         try:
             if rebase:
-                self.repo.remotes.origin.pull(refspec=branch, rebase=True, progress=None)
+                self.repo.remotes.origin.pull(
+                    refspec=branch, rebase=True, progress=None
+                )
             else:
                 self.repo.remotes.origin.pull(branch)
         except GitCommandError as exc:
