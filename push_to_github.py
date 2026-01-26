@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Push a local folder to GitHub without leaking the PAT.
-The PAT must be supplied via the environment variable GITHUB_TOKEN.
-"""
-
 import os
 import sys
 from pathlib import Path
