@@ -12,4 +12,6 @@ IGNORED_ITEMS = [
     "llama-server",
     "nohup.out",
     "__pycache__",
+    "ngrok.log",
+    "llama_server.log",
 ]
