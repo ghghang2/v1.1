@@ -120,14 +120,12 @@ def main() -> None:
     # Pull the latest changes from the remote so we can push
     # ------------------------------------------------------------------
     try:
-        # Fast‑forward merge (default)
-        repo.git.pull("origin", "main")
+        # Rebase local commits onto the fetched remote branch.
+        repo.git.pull("origin", "main", "--rebase")
     except GitCommandError as exc:
-        # If a fast‑forward isn’t possible, try a rebase
-        if "non-fast-forward" in str(exc):
-            repo.git.pull("--rebase", "origin", "main")
-        else:
-            raise
+        # If rebase fails (unlikely) fall back to a normal merge.
+        print(f"Rebase failed: {exc}. Falling back to merge.")
+        repo.git.pull("origin", "main")
 
     # Push to the remote and set upstream
     try:
