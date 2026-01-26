@@ -133,11 +133,17 @@ def main():
     components.html(
         f"""
         <script>
-        window.hasPushed = {str(has_pushed).lower()};
-        window.onbeforeunload = function(e) {{
-          if (!window.hasPushed) {{
+        // Make the flag visible to the outer window
+        window.top.hasPushed = {str(has_pushed).lower()};
+
+        // Attach the unload guard to the outer window
+        window.top.onbeforeunload = function (e) {{
+            if (!window.top.hasPushed) {{
+            // Modern browsers require e.preventDefault() + e.returnValue
+            e.preventDefault();
+            e.returnValue = '';
             return 'You have not pushed to GitHub yet.\\nDo you really want to leave?';
-          }}
+            }}
         }};
         </script>
         """,
