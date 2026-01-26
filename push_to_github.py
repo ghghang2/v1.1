@@ -117,16 +117,17 @@ def main() -> None:
         print("Switched to existing branch 'main'.")
 
     # *** NEW: discard any stale merge‑conflict files ***
-    repo.git.reset("--hard")          # ensures a clean working tree
+    repo.git.reset("--hard")
 
     # ------------------------------------------------------------------
     # Pull the latest changes from the remote so we can push
     # ------------------------------------------------------------------
     try:
         # Rebase local commits onto the fetched remote branch.
-        repo.git.pull("origin", "main", "--rebase")
+        # Pass the option *before* the remote/branch arguments.
+        repo.git.pull("--rebase", "origin", "main")
     except GitCommandError as exc:
-        # If rebase fails (unlikely) fall back to a normal merge.
+        # If rebase fails, try a normal merge as a fallback.
         print(f"Rebase failed: {exc}. Falling back to merge.")
         repo.git.pull("origin", "main")
 
