@@ -344,8 +344,12 @@ if __name__ == "__main__":
 ## push_to_github.py
 
 ```python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import os
 import sys
+import shutil
 from pathlib import Path
 
 from github import Github, GithubException
@@ -356,7 +360,7 @@ from git import Repo, GitCommandError, InvalidGitRepositoryError
 # USER SETTINGS
 # ------------------------------------------------------------------
 LOCAL_DIR   = Path(__file__).parent          # folder you want to push
-REPO_NAME   = "v1"                            # GitHub repo name
+REPO_NAME   = "v1.1"                            # GitHub repo name
 USER_NAME   = "ghghang2"                      # e.g. ghghang2
 
 IGNORED_ITEMS = [
@@ -463,17 +467,33 @@ def main() -> None:
     # Pull the latest changes from the remote so we can push
     # ------------------------------------------------------------------
     try:
+        # Clean up a stale rebase directory if it exists
+        rebase_dir = repo_path / ".git" / "rebase-merge"
+        if rebase_dir.exists():
+            shutil.rmtree(rebase_dir)
+            print("Removed stale rebase-merge directory.")
+
+        # Tell Git that we want to rebase automatically
+        repo.git.config('pull.rebase', 'true')
+
         # Rebase local commits onto the fetched remote branch.
-        # Pass the option *before* the remote/branch arguments.
-        repo.git.pull("--rebase", "origin", "main")
+        repo.git.pull('--rebase', 'origin', 'main')
     except GitCommandError as exc:
-        # If rebase fails, try a normal merge as a fallback.
         print(f"Rebase failed: {exc}. Falling back to merge.")
-        repo.git.pull("origin", "main")
+
+        # Ensure we have a Git identity (local config is sufficient)
+        repo.git.config('user.email', 'you@example.com')
+        repo.git.config('user.name', 'Your Name')
+
+        try:
+            repo.git.merge('origin/main')
+        except GitCommandError as merge_exc:
+            print(f"Merge also failed: {merge_exc}. Aborting push.")
+            sys.exit(1)
 
     # Push to the remote and set upstream
     try:
-        repo.git.push("-u", "origin", "main")
+        repo.git.push('-u', 'origin', 'main')
         print("Push complete. Remote 'main' is now tracked.")
     except GitCommandError as exc:
         print(f"Git operation failed: {exc}")
