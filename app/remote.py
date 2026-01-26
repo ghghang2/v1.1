@@ -1,15 +1,16 @@
-# app/remote.py
+# remote/remote.py
 """
-A thin wrapper around gitpython + PyGithub that knows how to create
-a repo, fetch/pull/push and keep the local repo up‑to‑date.
+A single, self‑contained adapter that knows how to talk to:
+  * a local Git repository (via gitpython)
+  * GitHub (via PyGithub)
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 import os
 import shutil
 import logging
-from pathlib import Path
 from typing import Optional
 
 from git import Repo, GitCommandError, InvalidGitRepositoryError
@@ -21,7 +22,6 @@ from .config import USER_NAME, REPO_NAME, IGNORED_ITEMS
 
 log = logging.getLogger(__name__)
 
-
 def _token() -> str:
     """Return the GitHub PAT from the environment."""
     t = os.getenv("GITHUB_TOKEN")
@@ -29,24 +29,9 @@ def _token() -> str:
         raise RuntimeError("GITHUB_TOKEN env variable not set")
     return t
 
-
 def _remote_url() -> str:
     """HTTPS URL that contains the PAT – used only for git push."""
     return f"https://{USER_NAME}:{_token()}@github.com/{USER_NAME}/{REPO_NAME}.git"
-
-
-# --------------------------------------------------------------------------- #
-#  Git configuration helper
-# --------------------------------------------------------------------------- #
-def _ensure_git_user(repo: Repo) -> None:
-    """Make sure the repo has a user.name / user.email so a commit can be made."""
-    cfg_reader = repo.config_reader()
-    if not cfg_reader.has_section("user") or not cfg_reader.has_section("user", "name"):
-        writer = repo.config_writer()
-        writer.set_value("user", "name", "auto-commit")
-        writer.set_value("user", "email", "auto-commit@example.com")
-        writer.release()
-
 
 class RemoteClient:
     """Thin wrapper around gitpython + PyGithub that knows how to create
@@ -82,29 +67,15 @@ class RemoteClient:
             log.info("No remote configured – skipping fetch")
 
     def pull(self, rebase: bool = True) -> None:
-        """Pull the `main` branch from origin, optionally rebasing.
-
-        If the repo has uncommitted changes we commit them first with a
-        deterministic message.  This guarantees that ``git pull`` (with or
-        without rebase) will succeed.
-        """
+        """Pull the `main` branch from origin, optionally rebasing."""
         if "origin" not in self.repo.remotes:
             raise RuntimeError("No remote named 'origin' configured")
 
         branch = "main"
         log.info("Pulling %s%s…", branch, " (rebase)" if rebase else "")
-
-        # 1️⃣  Commit any dirty work
-        if self.repo.is_dirty(untracked_files=True):
-            log.info("Committing local changes before pull")
-            self.commit_all("Auto‑commit before pull")
-
-        # 2️⃣  Pull
         try:
             if rebase:
-                self.repo.remotes.origin.pull(
-                    refspec=branch, rebase=True, progress=None
-                )
+                self.repo.remotes.origin.pull(refspec=branch, rebase=True, progress=None)
             else:
                 self.repo.remotes.origin.pull(branch)
         except GitCommandError as exc:
@@ -157,9 +128,6 @@ class RemoteClient:
 
     def commit_all(self, message: str = "Initial commit") -> None:
         """Stage everything and commit (ignoring the 'nothing to commit' error)."""
-        # Ensure the repo can commit
-        _ensure_git_user(self.repo)
-
         self.repo.git.add(A=True)
         try:
             self.repo.index.commit(message)
