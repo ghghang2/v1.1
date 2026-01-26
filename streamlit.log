@@ -1,0 +1,14 @@
+
+Collecting usage statistics. To deactivate, set browser.gatherUsageStats to false.
+
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8002
+  Network URL: http://172.28.0.12:8002
+  External URL: http://136.110.63.74:8002
+
+Rebase failed: Cmd('git') failed due to: exit code(128)
+  cmdline: git pull -v --rebase -- origin main
+  stderr: 'error: cannot pull with rebase: You have unstaged changes.
+error: please commit or stash them.' – falling back to merge
