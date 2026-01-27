@@ -287,22 +287,91 @@ class RemoteClient:
                 raise
 ```
 
+## app/tools.py
+
+```python
+# app/tools.py
+import json
+from typing import Callable, Dict, Any, List
+from dataclasses import dataclass, field
+
+@dataclass
+class Tool:
+    name: str
+    description: str
+    func: Callable
+    schema: Dict[str, Any] = field(init=False)
+
+    def __post_init__(self):
+        # Build a minimal JSON‑schema from the function signature.
+        # For this demo we hard‑code the schema, but you can introspect
+        # annotations for a more general solution.
+        if self.name == "get_stock_price":
+            self.schema = {
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticker": {"type": "string", "description": "Stock symbol, e.g. AAPL"},
+                    },
+                    "required": ["ticker"],
+                },
+            }
+        else:
+            raise NotImplementedError("Schema auto‑generation not implemented")
+
+def get_stock_price(ticker: str) -> str:
+    data = {"AAPL": 24, "GOOGL": 178.20, "NVDA": 580.12}
+    price = data.get(ticker, "unknown")
+    return json.dumps({"ticker": ticker, "price": price})
+
+# Register the tool
+TOOLS: List[Tool] = [
+    Tool(
+        name="get_stock_price",
+        description="Get the current stock price for a ticker",
+        func=get_stock_price,
+    )
+]
+
+def get_tools() -> List[Dict]:
+    """
+    Return the list of tool definitions formatted for the OpenAI API.
+    Each element has the required `"type": "function"` wrapper.
+    """
+    api_tools = []
+    for t in TOOLS:
+        api_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.schema["parameters"],
+                },
+            }
+        )
+    return api_tools
+```
+
 ## app/utils.py
 
 ```python
 # app/utils.py  (only the added/modified parts)
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Any
 from .config import DEFAULT_SYSTEM_PROMPT, MODEL_NAME
 from .client import get_client
 from openai import OpenAI
+from .tools import get_tools
 
 def build_api_messages(
     history: List[Tuple[str, str]],
     system_prompt: str,
     repo_docs: Optional[str] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict]:
     """
-    Convert local chat history into the format expected by the OpenAI API.
+    Convert local chat history into the format expected by the OpenAI API,
+    optionally adding a tool list.
     """
     msgs = [{"role": "system", "content": system_prompt}]
     if repo_docs:
@@ -310,6 +379,7 @@ def build_api_messages(
     for user_msg, bot_msg in history:
         msgs.append({"role": "user", "content": user_msg})
         msgs.append({"role": "assistant", "content": bot_msg})
+    # The client will pass `tools=tools` when calling chat.completions.create
     return msgs
 
 def stream_response(
@@ -318,24 +388,34 @@ def stream_response(
     client: OpenAI,
     system_prompt: str,
     repo_docs: Optional[str] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
 ):
     """
     Yield the cumulative assistant reply while streaming.
+    Also returns any tool call(s) that the model requested.
     """
     new_hist = history + [(user_msg, "")]
-    api_msgs = build_api_messages(new_hist, system_prompt, repo_docs)
+    api_msgs = build_api_messages(new_hist, system_prompt, repo_docs, tools)
 
     stream = client.chat.completions.create(
         model=MODEL_NAME,
         messages=api_msgs,
         stream=True,
+        tools=tools,
     )
 
     full_resp = ""
+    tool_calls = None
     for chunk in stream:
         token = chunk.choices[0].delta.content or ""
         full_resp += token
         yield full_resp
+
+        # Capture tool calls once the model finishes sending them
+        if chunk.choices[0].delta.tool_calls:
+            tool_calls = chunk.choices[0].delta.tool_calls
+
+    return full_resp, tool_calls
 ```
 
 ## app.py
@@ -487,6 +567,246 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# # app.py
+# import streamlit as st
+# import streamlit.components.v1 as components
+# from pathlib import Path
+# from git import Repo, InvalidGitRepositoryError
+# from app.config import DEFAULT_SYSTEM_PROMPT
+# from app.client import get_client
+# from app.tools import get_tools, TOOLS          # new registry
+# from app.docs_extractor import extract
+# import json
+
+# # --------------------------------------------------------------------------- #
+# #  Helpers
+# # --------------------------------------------------------------------------- #
+# def refresh_docs() -> str:
+#     """Run the extractor once (same folder as app.py)."""
+#     return extract().read_text(encoding="utf-8")
+
+# def is_repo_up_to_date(repo_path: Path) -> bool:
+#     """Return True iff local HEAD == remote `origin/main` AND no dirty files."""
+#     try:
+#         repo = Repo(repo_path)
+#     except InvalidGitRepositoryError:
+#         return False
+
+#     if not repo.remotes:
+#         return False
+
+#     origin = repo.remotes.origin
+#     try:
+#         origin.fetch()
+#     except Exception:
+#         return False
+
+#     for branch_name in ("main", "master"):
+#         try:
+#             remote_branch = origin.refs[branch_name]
+#             break
+#         except IndexError:
+#             continue
+#     else:
+#         return False
+
+#     return (
+#         repo.head.commit.hexsha == remote_branch.commit.hexsha
+#         and not repo.is_dirty(untracked_files=True)
+#     )
+
+# # --------------------------------------------------------------------------- #
+# #  Message building & streaming (needed for function calling)
+# # --------------------------------------------------------------------------- #
+# def build_messages(
+#     history,
+#     system_prompt,
+#     repo_docs,
+#     user_input=None,
+# ):
+#     msgs = [{"role": "system", "content": system_prompt}]
+#     if repo_docs:
+#         msgs.append({"role": "assistant", "content": repo_docs})
+#     for u, a in history:
+#         msgs.append({"role": "user", "content": u})
+#         msgs.append({"role": "assistant", "content": a})
+#     if user_input is not None:
+#         msgs.append({"role": "user", "content": user_input})
+#     return msgs
+
+
+# def stream_and_collect(client, messages, tools, placeholder):
+#     """Stream assistant reply and capture any tool calls."""
+    
+#     stream = client.chat.completions.create(
+#         model="unsloth/gpt-oss-20b-GGUF:F16",
+#         messages=messages,
+#         stream=True,
+#         tools=tools,
+#     )
+
+#     full_resp = ""
+#     tool_calls = None
+#     for chunk in stream:
+#         delta = chunk.choices[0].delta
+#         content = delta.content or ""
+#         full_resp += content
+#         placeholder.markdown(full_resp, unsafe_allow_html=True)
+
+#         if delta.tool_calls:
+#             tool_calls = delta.tool_calls
+#     return full_resp, tool_calls
+
+
+# # --------------------------------------------------------------------------- #
+# #  Streamlit UI
+# # --------------------------------------------------------------------------- #
+# def main():
+#     st.set_page_config(page_title="Chat with GPT‑OSS", layout="wide")
+#     REPO_PATH = Path(__file__).parent
+
+#     # session state
+#     st.session_state.setdefault("history", [])
+#     st.session_state.setdefault("system_prompt", DEFAULT_SYSTEM_PROMPT)
+#     st.session_state.setdefault("repo_docs", "")
+#     st.session_state.has_pushed = is_repo_up_to_date(REPO_PATH)
+
+#     with st.sidebar:
+#         st.header("Settings")
+
+#         # System prompt editor
+#         prompt = st.text_area(
+#             "System prompt",
+#             st.session_state.system_prompt,
+#             height=120,
+#         )
+#         if prompt != st.session_state.system_prompt:
+#             st.session_state.system_prompt = prompt
+
+#         # New chat button
+#         if st.button("New Chat"):
+#             st.session_state.history = []
+#             st.session_state.repo_docs = ""
+#             st.success("Chat history cleared. Start fresh!")
+
+#         # Refresh docs button
+#         if st.button("Refresh Docs"):
+#             st.session_state.repo_docs = refresh_docs()
+#             st.success("Codebase docs updated!")
+
+#         # Push to GitHub button
+#         if st.button("Push to GitHub"):
+#             with st.spinner("Pushing to GitHub…"):
+#                 try:
+#                     from app.push_to_github import main as push_main
+#                     push_main()
+#                     st.session_state.has_pushed = True
+#                     st.success("✅  Repository pushed to GitHub.")
+#                 except Exception as exc:
+#                     st.error(f"❌  Push failed: {exc}")
+
+#         # Push status
+#         status = "✅  Pushed" if st.session_state.has_pushed else "⚠️  Not pushed"
+#         st.markdown(f"**Push status:** {status}")
+
+#         # Show available tools
+#         st.subheader("Available tools")
+#         for t in TOOLS:
+#             st.markdown(f"- **{t.name}**: {t.description}")
+
+#     # Render chat history
+#     for user_msg, bot_msg in st.session_state.history:
+#         with st.chat_message("user"):
+#             st.markdown(user_msg)
+#         with st.chat_message("assistant"):
+#             st.markdown(bot_msg)
+
+#     # User input
+#     if user_input := st.chat_input("Enter request…"):
+#         st.chat_message("user").markdown(user_input)
+
+#         client = get_client()
+#         tools = get_tools()
+
+#         # Build messages for the first call
+#         msgs = build_messages(
+#             st.session_state.history,
+#             st.session_state.system_prompt,
+#             st.session_state.repo_docs,
+#             user_input,
+#         )
+
+#         with st.chat_message("assistant") as assistant_msg:
+#             placeholder = st.empty()
+#             final_text, tool_calls = stream_and_collect(
+#                 client, msgs, tools, placeholder
+#             )
+
+#         # Append assistant reply to history
+#         st.session_state.history.append((user_input, final_text))
+
+#         # If the model wanted to call a tool
+#         if tool_calls:
+#             tool_call = tool_calls[0]
+#             args = json.loads(tool_call.function.arguments)
+#             func = next((t.func for t in TOOLS if t.name == tool_call.function.name), None)
+
+#             if func is None:
+#                 tool_result = f"⚠️  Tool '{tool_call.function.name}' not registered."
+#             else:
+#                 try:
+#                     tool_result = func(**args)
+#                 except Exception as exc:
+#                     tool_result = f"❌  Tool error: {exc}"
+
+#             # Show the tool call & its result
+#             st.chat_message("assistant").markdown(
+#                 f"**Tool call**: `{tool_call.function.name}({', '.join(f'{k}={v}' for k, v in args.items())})` → `{tool_result}`"
+#             )
+
+#             # Send the tool result back to the model for the final answer
+#             tool_msg = {
+#                 "role": "tool",
+#                 "tool_call_id": tool_call.id,
+#                 "content": tool_result,
+#             }
+#             msgs2 = build_messages(
+#                 st.session_state.history,
+#                 st.session_state.system_prompt,
+#                 st.session_state.repo_docs,
+#             )
+#             msgs2.append(tool_msg)
+
+#             with st.chat_message("assistant") as assistant_msg2:
+#                 placeholder2 = st.empty()
+#                 final_text2, _ = stream_and_collect(
+#                     client, msgs2, tools, placeholder2
+#                 )
+
+#             # Replace the assistant reply with the final answer
+#             st.session_state.history[-1] = (user_input, final_text2)
+
+#     # Browser‑leaving guard
+#     has_pushed = st.session_state.get("has_pushed", False)
+#     components.html(
+#         f"""
+#         <script>
+#         window.top.hasPushed = {str(has_pushed).lower()};
+#         window.top.onbeforeunload = function (e) {{
+#             if (!window.top.hasPushed) {{
+#                 e.preventDefault(); e.returnValue = '';
+#                 return 'You have not pushed to GitHub yet.\\nDo you really want to leave?';
+#             }}
+#         }};
+#         </script>
+#         """,
+#         height=0,
+#     )
+
+
+# if __name__ == "__main__":
+#     main()
 ```
 
 ## run.py
@@ -494,23 +814,45 @@ if __name__ == "__main__":
 ```python
 #!/usr/bin/env python3
 """
-Launch the llama‑server demo in true head‑less mode.
-Optimized for Google Colab notebooks with persistent ngrok tunnels.
+run.py –  Start the llama‑server + Streamlit UI + ngrok tunnel
+and provide simple status/stop helpers.
+
+Typical usage
+-------------
+    python run.py          # start everything
+    python run.py --status # inspect current state
+    python run.py --stop   # terminate all services
 """
+
+from __future__ import annotations
+
+import json
 import os
+import signal
 import subprocess
 import sys
 import time
-import socket
-import json
 import urllib.request
 from pathlib import Path
+from typing import Iterable
 
 # --------------------------------------------------------------------------- #
-#  Utility helpers
+#  Constants & helpers
 # --------------------------------------------------------------------------- #
-def run(cmd, *, shell=False, cwd=None, env=None, capture=False):
-    """Run a command and optionally capture its output."""
+SERVICE_INFO = Path("service_info.json")
+NGROK_LOG = Path("ngrok.log")
+STREAMLIT_LOG = Path("streamlit.log")
+LLAMA_LOG = Path("llama_server.log")
+REPO = "ghghang2/llamacpp_t4_v1"          # repo containing the pre‑built binary
+MODEL = "unsloth/gpt-oss-20b-GGUF:F16"   # model used by llama‑server
+
+# Ports used by the services
+PORTS = (4040, 8000, 8002)
+
+def _run(cmd: Iterable[str] | str, *, shell: bool = False,
+          cwd: Path | None = None, capture: bool = False,
+          env: dict | None = None) -> str | None:
+    """Convenience wrapper around subprocess.run."""
     env = env or os.environ.copy()
     result = subprocess.run(
         cmd,
@@ -524,74 +866,73 @@ def run(cmd, *, shell=False, cwd=None, env=None, capture=False):
     )
     return result.stdout.strip() if capture else None
 
-def is_port_in_use(port):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("localhost", port)) == 0
+def _is_port_free(port: int) -> bool:
+    """Return True if the port is not currently bound."""
+    with subprocess.Popen(["ss", "-tuln"], stdout=subprocess.PIPE) as p:
+        return str(port) not in p.stdout.read().decode()
 
-def wait_for_service(url, timeout=30, interval=1):
-    """Wait for a service to respond with HTTP 200."""
+def _wait_for(url: str, *, timeout: int = 30, interval: float = 1.0) -> bool:
+    """Poll a URL until it returns 200 or timeout expires."""
     for _ in range(int(timeout / interval)):
         try:
             with urllib.request.urlopen(url, timeout=5) as r:
-                if r.status == 200:
-                    return True
+                return r.status == 200
         except Exception:
             pass
         time.sleep(interval)
     return False
 
-def save_service_info(tunnel_url, llama_pid, streamlit_pid, ngrok_pid):
-    """Persist service info for later queries."""
-    info = {
+def _save_service_info(tunnel_url: str, llama: int, streamlit: int, ngrok: int) -> None:
+    """Persist the running process IDs and the public tunnel URL."""
+    data = {
         "tunnel_url": tunnel_url,
-        "llama_server_pid": llama_pid,
-        "streamlit_pid": streamlit_pid,
-        "ngrok_pid": ngrok_pid,
+        "llama_server_pid": llama,
+        "streamlit_pid": streamlit,
+        "ngrok_pid": ngrok,
         "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
-    Path("service_info.json").write_text(json.dumps(info, indent=2))
+    SERVICE_INFO.write_text(json.dumps(data, indent=2))
     Path("tunnel_url.txt").write_text(tunnel_url)
 
 # --------------------------------------------------------------------------- #
-#  Main routine
+#  Core logic – start the services
 # --------------------------------------------------------------------------- #
-def main():
-    GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-    NGROK_TOKEN = os.getenv("NGROK_TOKEN")
-    if not GITHUB_TOKEN or not NGROK_TOKEN:
-        sys.exit("[ERROR] GITHUB_TOKEN and NGROK_TOKEN must be set")
+def main() -> None:
+    """Start all services and record their state."""
+    # --- 1️⃣  Validate environment -----------------------------------------
+    if not os.getenv("GITHUB_TOKEN") or not os.getenv("NGROK_TOKEN"):
+        sys.exit("[ERROR] Both GITHUB_TOKEN and NGROK_TOKEN must be set")
 
-    for port in (4040, 8000, 8002):
-        if is_port_in_use(port):
-            sys.exit(f"[ERROR] Port {port} is already in use")
+    # --- 2️⃣  Ensure ports are free ----------------------------------------
+    for p in PORTS:
+        if not _is_port_free(p):
+            sys.exit(f"[ERROR] Port {p} is already in use")
 
-    # 1️⃣  Download the pre‑built llama‑server binary
-    REPO = "ghghang2/llamacpp_t4_v1"
-    run(f"gh release download --repo {REPO} --pattern llama-server", shell=True, env={"GITHUB_TOKEN": GITHUB_TOKEN})
-    run("chmod +x ./llama-server", shell=True)
+    # --- 3️⃣  Download the pre‑built llama‑server -------------------------
+    _run(
+        f"gh release download --repo {REPO} --pattern llama-server",
+        shell=True,
+        env={"GITHUB_TOKEN": os.getenv("GITHUB_TOKEN")},
+    )
+    _run("chmod +x ./llama-server", shell=True)
 
-    # 2️⃣  Start llama‑server
-    llama_log = Path("llama_server.log").open("w", encoding="utf-8", buffering=1)
+    # --- 4️⃣  Start llama‑server ------------------------------------------
     llama_proc = subprocess.Popen(
-        ["./llama-server", "-hf", "unsloth/gpt-oss-20b-GGUF:F16", "--port", "8000"],
-        stdout=llama_log,
-        stderr=llama_log,
+        ["./llama-server", "-hf", MODEL, "--port", "8000"],
+        stdout=LLAMA_LOG.open("w", encoding="utf-8", buffering=1),
+        stderr=LLAMA_LOG,
         start_new_session=True,
     )
-    print(f"✅ llama-server started (PID: {llama_proc.pid}), waiting for ready…")
-    if not wait_for_service("http://localhost:8000/health", timeout=240):
+    print(f"✅  llama-server started (PID: {llama_proc.pid}) – waiting…")
+    if not _wait_for("http://localhost:8000/health", timeout=240):
         llama_proc.terminate()
-        llama_log.close()
         sys.exit("[ERROR] llama-server failed to start")
 
-    print("✅ llama-server is ready on port 8000")
+    # --- 5️⃣  Install required Python packages ----------------------------
+    print("📦  Installing Python dependencies…")
+    _run("pip install -q streamlit pygithub pyngrok", shell=True)
 
-    # 3️⃣  Install required Python packages
-    print("📦 Installing Python packages…")
-    run("pip install -q streamlit pygithub pyngrok", shell=True)
-
-    # 4️⃣  Start Streamlit UI
-    streamlit_log = Path("streamlit.log").open("w", encoding="utf-8", buffering=1)
+    # --- 6️⃣  Start Streamlit UI ------------------------------------------
     streamlit_proc = subprocess.Popen(
         [
             "streamlit",
@@ -602,24 +943,18 @@ def main():
             "--server.headless",
             "true",
         ],
-        stdout=streamlit_log,
-        stderr=streamlit_log,
+        stdout=STREAMLIT_LOG.open("w", encoding="utf-8", buffering=1),
+        stderr=STREAMLIT_LOG,
         start_new_session=True,
     )
-    print(f"✅ Streamlit started (PID: {streamlit_proc.pid}), waiting for ready…")
-    if not wait_for_service("http://localhost:8002", timeout=30):
+    print(f"✅  Streamlit started (PID: {streamlit_proc.pid}) – waiting…")
+    if not _wait_for("http://localhost:8002", timeout=30):
         streamlit_proc.terminate()
-        streamlit_log.close()
-        llama_proc.terminate()
-        llama_log.close()
         sys.exit("[ERROR] Streamlit failed to start")
 
-    print("✅ Streamlit is ready on port 8002")
-
-    # 5️⃣  Start ngrok
-    print("🌐 Setting up ngrok tunnel…")
+    # --- 7️⃣  Start ngrok tunnel ------------------------------------------
     ngrok_config = f"""version: 2
-authtoken: {NGROK_TOKEN}
+authtoken: {os.getenv('NGROK_TOKEN')}
 tunnels:
   streamlit:
     proto: http
@@ -627,21 +962,15 @@ tunnels:
 """
     Path("ngrok.yml").write_text(ngrok_config)
 
-    ngrok_log = Path("ngrok.log").open("w", encoding="utf-8", buffering=1)
     ngrok_proc = subprocess.Popen(
         ["ngrok", "start", "--all", "--config", "ngrok.yml", "--log", "stdout"],
-        stdout=ngrok_log,
-        stderr=ngrok_log,
+        stdout=NGROK_LOG.open("w", encoding="utf-8", buffering=1),
+        stderr=NGROK_LOG,
         start_new_session=True,
     )
-    print(f"✅ ngrok started (PID: {ngrok_proc.pid}), waiting for tunnel…")
-    if not wait_for_service("http://localhost:4040/api/tunnels", timeout=15):
+    print(f"✅  ngrok started (PID: {ngrok_proc.pid}) – waiting…")
+    if not _wait_for("http://localhost:4040/api/tunnels", timeout=15):
         ngrok_proc.terminate()
-        ngrok_log.close()
-        streamlit_proc.terminate()
-        streamlit_log.close()
-        llama_proc.terminate()
-        llama_log.close()
         sys.exit("[ERROR] ngrok API did not become available")
 
     # Grab the public URL
@@ -649,124 +978,120 @@ tunnels:
         with urllib.request.urlopen("http://localhost:4040/api/tunnels", timeout=5) as r:
             tunnels = json.loads(r.read())
             tunnel_url = next(
-                (t["public_url"] for t in tunnels["tunnels"] if t["public_url"].startswith("https")),
+                (t["public_url"] for t in tunnels["tunnels"]
+                 if t["public_url"].startswith("https")),
                 tunnels["tunnels"][0]["public_url"],
             )
     except Exception as exc:
-        print(f"[ERROR] Could not get tunnel URL: {exc}")
-        sys.exit(1)
+        sys.exit(f"[ERROR] Could not retrieve ngrok URL: {exc}")
 
-    print("✅ ngrok tunnel established")
+    print("✅  ngrok tunnel established")
+    print(f"🌐  Public URL: {tunnel_url}")
 
-    # Persist service info
-    save_service_info(tunnel_url, llama_proc.pid, streamlit_proc.pid, ngrok_proc.pid)
+    # Persist state
+    _save_service_info(tunnel_url, llama_proc.pid, streamlit_proc.pid, ngrok_proc.pid)
+
+    print("\n🎉  ALL SERVICES RUNNING SUCCESSFULLY!")
+    print("=" * 70)
+
+# --------------------------------------------------------------------------- #
+#  Helper commands – status and stop
+# --------------------------------------------------------------------------- #
+def _load_service_info() -> dict:
+    if not SERVICE_INFO.exists():
+        raise FileNotFoundError("No service_info.json found – are the services running?")
+    return json.loads(SERVICE_INFO.read_text())
+
+def status() -> None:
+    """Print a quick report of the running services."""
+    try:
+        info = _load_service_info()
+    except FileNotFoundError as exc:
+        print(exc)
+        return
 
     print("\n" + "=" * 70)
-    print("🎉 ALL SERVICES RUNNING SUCCESSFULLY!")
-    print("=" * 70)
-    print(f"🌐 Public URL: {tunnel_url}")
-    print(f"🦙 llama-server PID: {llama_proc.pid}")
-    print(f"📊 Streamlit PID: {streamlit_proc.pid}")
-    print(f"🔌 ngrok PID: {ngrok_proc.pid}")
-    print("=" * 70)
-    print("\n📝 Service info saved to: service_info.json")
-    print("📝 Tunnel URL saved to: tunnel_url.txt")
-
-def status():
-    """Check the status of running services."""
-    if not Path("service_info.json").exists():
-        print("❌ No service info found. Services may not be running.")
-        return
-    
-    with open("service_info.json", "r") as f:
-        info = json.load(f)
-    
-    print("\n" + "="*70)
     print("SERVICE STATUS")
-    print("="*70)
+    print("=" * 70)
     print(f"Started at: {info['started_at']}")
     print(f"Public URL: {info['tunnel_url']}")
     print(f"llama-server PID: {info['llama_server_pid']}")
     print(f"Streamlit PID: {info['streamlit_pid']}")
     print(f"ngrok PID: {info['ngrok_pid']}")
-    print("="*70)
-    
-    # Check if processes are still running
-    for name, pid in [("llama-server", info['llama_server_pid']), 
-                       ("Streamlit", info['streamlit_pid']),
-                       ("ngrok", info['ngrok_pid'])]:
+    print("=" * 70)
+
+    # Check if processes are alive
+    for name, pid in [
+        ("llama-server", info["llama_server_pid"]),
+        ("Streamlit", info["streamlit_pid"]),
+        ("ngrok", info["ngrok_pid"]),
+    ]:
         try:
-            os.kill(pid, 0)  # Check if process exists
-            print(f"✅ {name} is running (PID: {pid})")
+            os.kill(pid, 0)
+            print(f"✅  {name} is running (PID: {pid})")
         except OSError:
-            print(f"❌ {name} is NOT running (PID: {pid})")
-    
-    # Verify tunnel is still active
-    print("\n🔍 Checking ngrok tunnel status...")
+            print(f"❌  {name} is NOT running (PID: {pid})")
+
+    # Verify tunnel
+    print("\n🔍  Checking ngrok tunnel status…")
     try:
-        tunnel_url = get_ngrok_tunnel_url(max_attempts=2, interval=1)
-        if tunnel_url:
-            print(f"✅ Tunnel is active: {tunnel_url}")
+        tunnel_url = _load_service_info()["tunnel_url"]
+        if _wait_for(tunnel_url, timeout=10):
+            print(f"✅  Tunnel is active: {tunnel_url}")
         else:
-            print("⚠️  Could not verify tunnel status")
+            print("⚠️  Tunnel is not reachable")
     except Exception as e:
         print(f"⚠️  Tunnel check failed: {e}")
-    
-    print("\n📋 Recent log entries:")
-    print("\n--- llama_server.log (last 5 lines) ---")
-    if Path("llama_server.log").exists():
-        run("tail -5 llama_server.log", shell=True)
-    
-    print("\n--- streamlit.log (last 5 lines) ---")
-    if Path("streamlit.log").exists():
-        run("tail -5 streamlit.log", shell=True)
-    
-    print("\n--- ngrok.log (last 5 lines) ---")
-    if Path("ngrok.log").exists():
-        run("tail -5 ngrok.log", shell=True)
 
+    # Show recent logs
+    for name, log in [("llama-server", LLAMA_LOG), ("Streamlit", STREAMLIT_LOG), ("ngrok", NGROK_LOG)]:
+        print(f"\n--- {name}.log (last 5 lines) ---")
+        if log.exists():
+            print(_run(f"tail -5 {log}", shell=True, capture=True))
+        else:
+            print(f"❌  Log file {log} not found")
 
-def stop():
-    """Stop all running services."""
-    if not Path("service_info.json").exists():
-        print("❌ No service info found. Services may not be running.")
+def stop() -> None:
+    """Terminate all services and clean up."""
+    try:
+        info = _load_service_info()
+    except FileNotFoundError:
+        print("❌  No service_info.json – nothing to stop")
         return
-    
-    with open("service_info.json", "r") as f:
-        info = json.load(f)
-    
-    print("🛑 Stopping services...")
-    
-    for name, pid in [("llama-server", info['llama_server_pid']), 
-                       ("Streamlit", info['streamlit_pid']),
-                       ("ngrok", info['ngrok_pid'])]:
+
+    print("🛑  Stopping services…")
+    for name, pid in [
+        ("llama-server", info["llama_server_pid"]),
+        ("Streamlit", info["streamlit_pid"]),
+        ("ngrok", info["ngrok_pid"]),
+    ]:
         try:
-            os.kill(pid, 15)  # SIGTERM
-            print(f"✅ Stopped {name} (PID: {pid})")
-            time.sleep(0.5)  # Give process time to terminate
+            os.kill(pid, signal.SIGTERM)
+            print(f"✅  Stopped {name} (PID: {pid})")
         except OSError:
             print(f"⚠️  {name} (PID: {pid}) was not running")
-    
-    print("\n✅ All services stopped")
-    
-    # Clean up service info file
-    try:
-        os.remove("service_info.json")
-        os.remove("tunnel_url.txt")
-        print("🧹 Cleaned up service info files")
-    except Exception:
-        pass
 
+    # Clean up the service info files
+    for path in (SERVICE_INFO, Path("tunnel_url.txt")):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    print("🧹  Cleaned up service info files")
 
+# --------------------------------------------------------------------------- #
+#  CLI entry point
+# --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        if sys.argv[1] == "--status":
+        cmd = sys.argv[1]
+        if cmd == "--status":
             status()
-        elif sys.argv[1] == "--stop":
+        elif cmd == "--stop":
             stop()
         else:
-            print(f"Unknown command: {sys.argv[1]}")
-            print("Usage: python launch_demo.py [--status|--stop]")
+            print(f"Unknown command: {cmd}")
+            print("Usage: python run.py [--status|--stop]")
             sys.exit(1)
     else:
         main()
