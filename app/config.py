@@ -15,7 +15,7 @@ DEFAULT_SYSTEM_PROMPT = "Be concise and accurate at all times"
 #  GitHub repository details
 # --------------------------------------------------------------------------- #
 USER_NAME = "ghghang2"
-REPO_NAME = "v1.2"
+REPO_NAME = "v1.3"
 
 # --------------------------------------------------------------------------- #
 #  Items to ignore in the repo
