@@ -1,7 +1,7 @@
 {
-  "tunnel_url": "https://821e8047ebb7.ngrok-free.app",
-  "llama_server_pid": 2051,
-  "streamlit_pid": 2073,
-  "ngrok_pid": 2077,
-  "started_at": "2026-01-27 08:20:04"
+  "tunnel_url": "https://f876173845a6.ngrok-free.app",
+  "llama_server_pid": 8067,
+  "streamlit_pid": 8095,
+  "ngrok_pid": 8099,
+  "started_at": "2026-01-28 09:46:52"
 }
