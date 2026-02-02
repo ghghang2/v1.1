@@ -88,7 +88,7 @@ def stream_and_collect(
         # Regular text
         if delta.content:
             full_resp += delta.content
-            # placeholder.markdown(full_resp, unsafe_allow_html=True)
+            placeholder.markdown(full_resp, unsafe_allow_html=True)
 
         # Tool calls – accumulate arguments per call id.
         if delta.tool_calls:
