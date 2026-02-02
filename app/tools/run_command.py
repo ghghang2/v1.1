@@ -2,16 +2,16 @@
 """
 Tool that executes a shell command and returns its output.
 
-This module exposes a **single callable** named ``func`` – the
+This module exposes a **single callable** named ``func`` ‑ the
 ``tools/__init__`` loader looks for that attribute (or falls back to the
 first callable in the module).  The module also supplies ``name`` and
 ``description`` attributes so that the tool can be discovered
 automatically and the OpenAI function‑calling schema can be built.
 
 The public API of this module is intentionally tiny:
-* ``func`` – the function that implements the tool
-* ``name`` – the name the model will use to refer to the tool
-* ``description`` – a short human‑readable description
+* ``func`` ‑ the function that implements the tool
+* ``name`` ‑ the name the model will use to refer to the tool
+* ``description`` ‑ a short human‑readable description
 
 The function returns a **JSON string**.  On success it contains a
 ``stdout``, ``stderr`` and ``exit_code`` key; on failure it contains an
@@ -19,7 +19,7 @@ The function returns a **JSON string**.  On success it contains a
 function‑calling workflow present in :mod:`app.chat`.
 
 The module is deliberately free of side‑effects and does not depend
-on any external configuration – it only needs the repository root,
+on any external configuration ‑ it only needs the repository root,
 which is derived from the location of this file.
 """
 
@@ -48,10 +48,9 @@ def _safe_resolve(repo_root: Path, rel_path: str) -> Path:
 #  The actual tool implementation
 # ---------------------------------------------------------------------------
 
-def _run_command(command: str, cwd: str | None = None) -> str:
+def _run_command(command: str) -> str:
     """
-    Execute ``command`` in the repository root (or a sub‑directory if
-    ``cwd`` is provided) and return a JSON string with:
+    Execute ``command`` in the repository root and return a JSON string with:
         * ``stdout``
         * ``stderr``
         * ``exit_code``
@@ -61,13 +60,10 @@ def _run_command(command: str, cwd: str | None = None) -> str:
         # ``run_command.py`` lives in ``app/tools``.
         # The repository root is two directories above ``app``:
         #   <repo_root>/app/tools/run_command.py
-        #   └───└───└─── run_command.py
-        # ``Path(__file__).parents[2]`` points at the repository root.
+        #   └─┬─┬─┬─ run_command.py
         repo_root = Path(__file__).resolve().parents[2]
-        if cwd:
-            target_dir = _safe_resolve(repo_root, cwd)
-        else:
-            target_dir = repo_root
+        # always run in the repository root
+        target_dir = repo_root
 
         # Run the command
         proc = subprocess.run(
@@ -97,9 +93,9 @@ func = _run_command
 # Optional, but helpful for humans and for the OpenAI schema
 name = "run_command"
 description = (
-    "Execute a shell command within the repository root (or a sub‑directory) and return the stdout, stderr and exit code.  Returns a JSON string with either the result keys or an ``error`` key on failure."
+    "Execute a shell command within the repository root and return the stdout, stderr and exit code.  Returns a JSON string with either the result keys or an ``error`` key on failure."
 )
 
-# The module's ``__all__`` is intentionally tiny – we only export what
+# The module's ``__all__`` is intentionally tiny ‑ we only export what
 # is needed for the tool discovery logic.
 __all__ = ["func", "name", "description"]

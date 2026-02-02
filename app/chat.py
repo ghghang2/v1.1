@@ -32,7 +32,6 @@ from .tools import TOOLS
 def build_messages(
     history: List[Tuple[str, str]],
     system_prompt: str,
-    # repo_docs: Optional[str],
     user_input: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Return the list of messages to send to the chat model.
@@ -49,8 +48,6 @@ def build_messages(
         The new user message that will trigger the assistant reply.
     """
     msgs: List[Dict[str, Any]] = [{"role": "system", "content": str(system_prompt)}]
-    # if repo_docs:
-    #     msgs.append({"role": "assistant", "content": str(repo_docs)})
 
     for u, a in history:
         msgs.append({"role": "user", "content": str(u)})
@@ -91,7 +88,7 @@ def stream_and_collect(
         # Regular text
         if delta.content:
             full_resp += delta.content
-            placeholder.markdown(full_resp, unsafe_allow_html=True)
+            # placeholder.markdown(full_resp, unsafe_allow_html=True)
 
         # Tool calls – accumulate arguments per call id.
         if delta.tool_calls:
@@ -116,7 +113,7 @@ def process_tool_calls(
     tools: List[Dict[str, Any]],
     placeholder: st.delta_generator.delta_generator,
     tool_calls: Optional[List[Dict[str, Any]]],
-) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
+) -> str:
     """
     Execute each tool that the model requested and keep asking the model
     for further replies until it stops calling tools.
@@ -179,11 +176,11 @@ def process_tool_calls(
                 else:
                     result = f"⚠️  Unknown tool '{tc.get('name')}'"
                     
-            preview = result[:80] + ("…" if len(result) > 80 else "")
+            preview = result[:10] + ("…" if len(result) > 10 else "")
             full_text += (
                 f"<details>"
-                f"<summary>**{tc.get('name')}**: `{json.dumps(args)}`</summary>"
-                f"\n\n**Result preview**: `{preview}`\n\n"
+                f"<summary>{tc.get('name')}|`{json.dumps(args)}`|{preview}</summary>"
+                f"\n\n`{result}`\n\n"
                 f"</details>"
             )
             
@@ -213,7 +210,7 @@ def process_tool_calls(
                 }
             )
             
-            full_text += result
+            # full_text += result
             
         new_placeholder = st.empty()
         new_text, new_tool_calls = stream_and_collect(
