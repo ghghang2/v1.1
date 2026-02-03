@@ -76,7 +76,7 @@ def stream_and_collect(
         tools=tools,
     )
 
-    full_resp = ""
+    assistant_text = ""
     reasoning_text = ""
     tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
     finished = False
@@ -98,8 +98,8 @@ def stream_and_collect(
 
         # Regular text
         if delta.content:
-            full_resp += delta.content
-            placeholder.markdown(full_resp, unsafe_allow_html=True)
+            assistant_text += delta.content
+            placeholder.markdown(assistant_text, unsafe_allow_html=True)
 
         # Tool calls – accumulate arguments per call id.
         if delta.tool_calls:
@@ -115,7 +115,7 @@ def stream_and_collect(
                     tool_calls_buffer[idx]["arguments"] += tc_delta.function.arguments
 
     final_tool_calls = list(tool_calls_buffer.values()) if tool_calls_buffer else None
-    return full_resp, final_tool_calls, finished, reasoning_text
+    return assistant_text, final_tool_calls, finished, reasoning_text
 
 
 def process_tool_calls(
