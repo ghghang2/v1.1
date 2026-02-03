@@ -218,7 +218,7 @@ def process_tool_calls(
             # full_text += result
             
         new_placeholder = st.empty()
-        new_text, new_tool_calls = stream_and_collect(
+        new_text, new_tool_calls, finished = stream_and_collect(
             client, messages, tools, new_placeholder
         )
         full_text += new_text
