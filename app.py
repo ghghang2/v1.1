@@ -65,6 +65,15 @@ def is_repo_up_to_date(repo_path: Path) -> bool:
 # Streamlit UI entry point
 
 def main() -> None:
+    st.markdown(
+        """
+        <style>
+        /* reduce spacing between widgets */
+        .stSidebar .css-1v0mbdj{margin: 0.1rem 0;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.set_page_config(page_title="Chat with GPT\u2011OSS", layout="wide")
     REPO_PATH = Path(__file__).parent
 
@@ -76,7 +85,8 @@ def main() -> None:
 
     # Sidebar
     with st.sidebar:
-        if st.button("New Chat"):
+        # --- session controls
+        if st.button("new chat", key="new_chat_btn"):
             st.session_state.session_id = str(uuid.uuid4())
             st.session_state.history = []
             st.session_state.repo_docs = ""
@@ -84,33 +94,37 @@ def main() -> None:
             st.success("Chat history cleared. Start fresh!")
             st.rerun()
 
-        if st.button("Ask Codebase"):
+        # --- advanced actions (collapsible)
+        # with st.expander("...", expanded=False):
+        if st.button("ask code"):
             st.session_state.system_prompt += "\n\n" + refresh_docs()
             st.success("Codebase docs updated!")
 
-        if st.button("Push to GitHub"):
+        # --- status indicator
+        status = "✅ Pushed" if st.session_state.has_pushed else "⚠️ Not pushed"
+        if st.button(status):
             with st.spinner("Pushing to GitHub…"):
                 try:
                     from app.push_to_github import main as push_main
                     push_main()
                     st.session_state.has_pushed = True
-                    st.success("\u2705  Repository pushed to GitHub.")
+                    st.success("✅ Repository pushed to GitHub.")
                 except Exception as exc:
-                    st.error(f"\u274c  Push failed: {exc}")
+                    st.error(f"❌ Push failed: {exc}")
 
-        status = "\u2705  Pushed" if st.session_state.has_pushed else "\u26a0\ufe0f  Not pushed"
-        st.markdown(f"**Push status:** {status}")
+        
+        # st.markdown(f"{status}")
 
-        st.subheader("Session selector")
+        # --- session selector
         session_options = ["new"] + get_session_ids()
-        selected = st.selectbox("Open a conversation", session_options)
+        selected = st.selectbox("Choose a session", session_options)
         if selected != "new":
             st.session_state["session_id"] = selected
             st.rerun()
 
-        st.subheader("Available tools")
+        # --- list of tools
         for t in TOOLS:
-            st.markdown(f"*{t.name}*")
+            st.markdown(f"{t.name}")
 
     # Load conversation
     session_id = st.session_state.get("session_id", str(uuid.uuid4()))
@@ -138,7 +152,7 @@ def main() -> None:
 
         full_text = assistant_text
         if tool_calls and not finished:
-            full_text = process_tool_calls(client, msgs, tools, placeholder, tool_calls, finished)
+            full_text = process_tool_calls(client, msgs, tools, placeholder, tool_calls, finished, assistant_text)
         else: 
             full_text = assistant_text
                 

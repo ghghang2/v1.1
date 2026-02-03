@@ -80,3 +80,21 @@ Collecting usage statistics. To deactivate, set browser.gatherUsageStats to fals
 [31m [0m   [2m224 [0m[2m│   │   [0mfull_text += new_text                                                  [31m [0m
 [31m────────────────────────────────────────────────────────────────────────────────────────[0m
 [1;91mValueError: [0mtoo many values to unpack [1m([0mexpected [1;36m2[0m[1m)[0m
+/content/app.py:92: SyntaxWarning: invalid escape sequence '\+'
+  with st.spinner("Pushing to GitHub…"):
+/content/app.py:92: SyntaxWarning: invalid escape sequence '\+'
+  with st.spinner("Pushing to GitHub…"):
+/content/app.py:92: SyntaxWarning: invalid escape sequence '\+'
+  with st.spinner("Pushing to GitHub…"):
+/content/app.py:90: SyntaxWarning: invalid escape sequence '\+'
+  
+/content/app.py:91: SyntaxWarning: invalid escape sequence '\+'
+  if st.button("Push to GitHub"):
+/content/app.py:92: SyntaxWarning: invalid escape sequence '\+'
+  with st.spinner("Pushing to GitHub…"):
+/content/app.py:94: SyntaxWarning: invalid escape sequence '\+'
+  from app.push_to_github import main as push_main
+/content/app.py:94: SyntaxWarning: invalid escape sequence '\+'
+  from app.push_to_github import main as push_main
+/content/app.py:93: SyntaxWarning: invalid escape sequence '\+'
+  try:
