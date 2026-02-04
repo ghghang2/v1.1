@@ -92,3 +92,4 @@ Collecting usage statistics. To deactivate, set browser.gatherUsageStats to fals
 [91m [0m                [1;91m▲[0m                                                                     [91m [0m
 [91m────────────────────────────────────────────────────────────────────────────────────────[0m
 [1;91mSyntaxError: [0munterminated string literal [1m([0mdetected at line [1;36m279[0m[1m)[0m
+2026-02-04 07:37:11.783 Session with id b95a40ed-8586-4902-b49e-c4ad2f0caf75 is already connected! Connecting to a new session.
