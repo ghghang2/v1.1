@@ -140,7 +140,8 @@ def main() -> None:
         if tool_name:
             st.chat_message(role).markdown(tool_name + ' called with args: ' + tool_args, unsafe_allow_html=True)
         else:
-            st.chat_message(role).markdown(content, unsafe_allow_html=True)
+            if content:
+                st.chat_message(role).markdown(content, unsafe_allow_html=True)
 
     # User input
     if user_input := st.chat_input("Enter request…"):
