@@ -20,14 +20,10 @@ from typing import Tuple
 # --------------------------------------------------------------------------- #
 # Regular‑expression helpers
 # --------------------------------------------------------------------------- #
-LOG_LINE_RE = re.compile(
-    r'(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| (?P<msg>.+)',
-    re.IGNORECASE,
+TOKENS_PER_SEC_RE = re.compile(
+    r'(?P<value>\d+(?:\.\d+)?)\s+tokens per second',
+    re.IGNORECASE
 )
-
-# Example: 2024-08-28 12:34:56.123 | eval: prompt 200 tokens (150 ms)
-PROMPT_RE = re.compile(r'prompt\s+(\d+)\s+tokens\s+\((\d+)\s+ms\)', re.IGNORECASE)
-PREDICT_RE = re.compile(r'predict\s+(\d+)\s+tokens\s+\((\d+)\s+ms\)', re.IGNORECASE)
 
 # --------------------------------------------------------------------------- #
 # Core logic
@@ -50,9 +46,8 @@ def parse_log(path_string) -> Tuple[bool, float]:
     with log_path.open("r", encoding="utf-8") as fp:
         lines = fp.readlines()
 
-    # Variables that will hold the last *seen* eval data
-    last_predict_tokens = 0
-    last_predict_ms = 0
+    is_processing = None
+    tps = None
 
     # Scan from bottom to top
     for raw_line in reversed(lines):
@@ -60,65 +55,22 @@ def parse_log(path_string) -> Tuple[bool, float]:
         if not raw_line:
             continue
 
-        m = LOG_LINE_RE.match(raw_line)
-        if not m:
-            continue
+        if is_processing is None:
 
-        msg = m.group("msg").lower()
+            if re.search(r'slot update_slots:', raw_line, re.IGNORECASE):
+                is_processing = True
 
-        # 1. If we hit an eval line first – the server is still processing.
-        if "eval:" in msg:
-            # Grab prediction tokens & time (if present)
-            m_q = PREDICT_RE.search(msg)
-            if m_q:
-                last_predict_tokens = int(m_q.group(1))
-                last_predict_ms = int(m_q.group(2))
-            # We can stop – the request is still in flight.
-            return True, _calc_tps(last_predict_tokens, last_predict_ms)
+            if raw_line.lower() == 'srv  update_slots: all slots are idle':
+                is_processing = False
+        
+        if re.search(r'eval time', raw_line, re.IGNORECASE):
+            m = TOKENS_PER_SEC_RE.search(raw_line)
+            if m:
+                tps = float(m.group('value'))
+                break
+                
+    return is_processing, tps
 
-        # 2. If we hit an update_slots line first – the request is done.
-        if "update_slots:" in msg or "all slots idle" in msg:
-            # No processing; we may still want to know the prediction TPS
-            # from the *most recent* eval that came before this line.
-            return False, _calc_tps(last_predict_tokens, last_predict_ms)
-
-    # Fallback – file had no eval or update_slots lines
-    return False, 0.0
-
-
-def _calc_tps(tokens: int, ms: int) -> float:
-    return tokens / (ms / 1000.0) if ms else 0.0
-
-# # Cache the metrics for 3 seconds to avoid excessive HTTP requests.
-# # @st.cache_data(ttl=3)
-# def get_llama_metrics(url: str) -> dict[str, str]:
-#     """Fetch metrics from the Llama server.
-
-#     Parameters
-#     ----------
-#     url: str
-#         The URL to query for metrics.
-
-#     Returns
-#     -------
-#     dict[str, str]
-#         Mapping of metric name to value.
-#     """
-#     try:
-#         resp = requests.get(url, timeout=2)
-#         resp.raise_for_status()
-#     except Exception as exc:  # pragma: no cover - defensive
-#         st.error(f"Could not fetch metrics: {exc}")
-#         return {}
-
-#     metrics: dict[str, str] = {}
-#     for line in resp.text.splitlines():
-#         if line.startswith("#") or not line:
-#             continue
-#         parts = line.split()
-#         if len(parts) >= 2:
-#             metrics[parts[0]] = parts[1]
-#     return metrics
 
 @st.fragment(run_every=1.0)
 def display_metrics_panel() -> None:
@@ -128,17 +80,8 @@ def display_metrics_panel() -> None:
     block the UI, making it safe to call from a Streamlit app.
     """
     processing, prediction_tps = parse_log("llama_server.log")
-    st.metric(label="processing", value=processing)
+    # Use emojis to indicate processing state: ⚙️ for running, ⏸️ for idle
+    emoji = "⚙️" if processing else "⏸️"
+    st.metric(label="processing", value=emoji)
     st.metric(label="tps", value=prediction_tps)
     st.write(f"Updated: {time.strftime('%H:%M:%S')}")
-    # placeholder = st.sidebar.empty()
-    # base_url = "http://localhost:8000/metrics"
-    # metrics = get_llama_metrics(base_url)
-
-    # if metrics:
-        
-    #     st.metric(label="processing", value=metrics['llamacpp:requests_processing'])
-    #     st.metric(label="tps", value=metrics['llamacpp:predicted_tokens_seconds'])
-    #     st.write(f"Updated: {time.strftime('%H:%M:%S')}")
-    # else:
-    #     placeholder.info("No metrics returned from server.")
