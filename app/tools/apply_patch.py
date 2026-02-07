@@ -265,7 +265,13 @@ def apply_patch(path: str, op_type: str, diff: str) -> str:
             if not target.exists():
                 raise FileNotFoundError(f"File not found: {path}")
             original = target.read_text(encoding="utf-8")
-            patched = apply_diff(original, diff)
+            # Handle simple replace diffs that lack +/– prefixes
+            diff_lines = diff.splitlines()
+            if diff_lines and diff_lines[0].startswith("@@") and not any(l.startswith(("+", "-")) for l in diff_lines[1:]):
+                # Treat lines after the header as the new content
+                patched = "\n".join(diff_lines[1:])
+            else:
+                patched = apply_diff(original, diff)
             target.write_text(patched, encoding="utf-8")
             return json.dumps({"result": f"File updated: {path}"})
 
