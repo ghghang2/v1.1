@@ -30,7 +30,7 @@ from app.tools.repo_overview import func
 from app.chat import build_messages, stream_and_collect, process_tool_calls
 from app.db import init_db, log_message, load_history, get_session_ids
 from app.metrics_ui import display_metrics_panel
-import subprocess
+
 
 # Initialise the database on first run
 init_db()
@@ -64,32 +64,6 @@ def is_repo_up_to_date(repo_path: Path) -> bool:
         return False
     return (repo.head.commit.hexsha == remote_branch.commit.hexsha and not repo.is_dirty(untracked_files=True))
 
-def changed_files():
-    # 1. Get list of files changed since the last push
-    diff = subprocess.check_output(
-        ["git", "diff", "--name-only", "HEAD"],
-        text=True
-    ).splitlines()
-
-    # Staged changes (optional)
-    staged = subprocess.check_output(
-        ["git", "diff", "--name-only", "--cached"], 
-        text=True
-    ).splitlines()
-
-    all_changes = set(diff + staged)
-
-    # 2. Filter according to your rules
-    out = []
-    for f in all_changes:
-        if "__pycache__" in f:
-            continue
-        if f in {"app.py", "run.py", "requirements.txt"}:
-            out.append(f)
-        elif (f.startswith("app/") or f.startswith("tests/")) and f.endswith(".py"):
-            out.append(f)
-
-    return out
 
 # Streamlit UI entry point
 
@@ -131,15 +105,6 @@ def main() -> None:
         display_metrics_panel()
 
         with st.container(border=True):
-
-            if "push_status" not in st.session_state:
-                st.session_state.push_status = "⚠️ Not pushed"
-            if "changed_files_list" not in st.session_state:
-                st.session_state.changed_files_list = changed_files()
-
-            st.session_state.push_status = "✅ Pushed" if not len(st.session_state.changed_files_list) else "⚠️ Not pushed"
-            st.markdown(f"{st.session_state.push_status}")
-            st.markdown('\n\n>' + '\n\n>'.join(st.session_state.changed_files_list))
             
             if st.button("push to git"):
                 with st.spinner("Pushing to GitHub…"):
@@ -148,13 +113,9 @@ def main() -> None:
                         push_main()
                         st.session_state.has_pushed = True
                         st.success("✅ Repository pushed to GitHub.")
-                        st.session_state.changed_files_list = changed_files()
-                        st.session_state.push_status = "✅ Pushed" 
                     except Exception as exc:
                         st.error(f"❌ Push failed: {exc}")
-
-            
-
+                        
         # --- list of tools
         with st.container(border=True):
             for t in TOOLS:
