@@ -30,6 +30,7 @@ from app.tools.repo_overview import func
 from app.chat import build_messages, stream_and_collect, process_tool_calls
 from app.db import init_db, log_message, load_history, get_session_ids
 from app.metrics_ui import display_metrics_panel
+import subprocess
 
 # Initialise the database on first run
 init_db()
@@ -63,6 +64,33 @@ def is_repo_up_to_date(repo_path: Path) -> bool:
         return False
     return (repo.head.commit.hexsha == remote_branch.commit.hexsha and not repo.is_dirty(untracked_files=True))
 
+def changed_files():
+    # 1. Get list of files changed since the last push
+    diff = subprocess.check_output(
+        ["git", "diff", "--name-only", "HEAD"],
+        text=True
+    ).splitlines()
+
+    # Staged changes (optional)
+    staged = subprocess.check_output(
+        ["git", "diff", "--name-only", "--cached"], 
+        text=True
+    ).splitlines()
+
+    all_changes = set(diff + staged)
+
+    # 2. Filter according to your rules
+    out = []
+    for f in all_changes:
+        if "__pycache__" in f:
+            continue
+        if f in {"app.py", "run.py", "requirements.txt"}:
+            out.append(f)
+        elif (f.startswith("app/") or f.startswith("tests/")) and f.endswith(".py"):
+            out.append(f)
+
+    return out
+
 # Streamlit UI entry point
 
 def main() -> None:
@@ -93,49 +121,44 @@ def main() -> None:
     # Sidebar
     with st.sidebar:
 
-        # --- Server Status expander (new)
-        display_metrics_panel()
-        
-        # --- session controls
         if st.button("new chat", key="new_chat_btn"):
             st.session_state.session_id = str(uuid.uuid4())
             st.session_state.history = []
             st.session_state.repo_docs = ""
             st.rerun()
 
-        # --- advanced actions (collapsible)
-        # with st.expander("...", expanded=False):
+        # --- Server Status expander (new)
+        display_metrics_panel()
+
+        with st.container(border=True):
+
+            changed_files_list = changed_files()
+            status = "✅ Pushed" if not len(changed_files_list) else "⚠️ Not pushed"
+            st.markdown(f"{status}")
+            st.markdown('\n\n>' + '\n\n>'.join(changed_files_list))
+            
+            # --- status indicator
+            if st.button("push to git"):
+                with st.spinner("Pushing to GitHub…"):
+                    try:
+                        from app.push_to_github import main as push_main
+                        push_main()
+                        st.session_state.has_pushed = True
+                        st.success("✅ Repository pushed to GitHub.")
+                    except Exception as exc:
+                        st.error(f"❌ Push failed: {exc}")
+
+            
+
+        # --- list of tools
+        with st.container(border=True):
+            for t in TOOLS:
+                st.markdown(f"{t.name}")
+            
         if st.button("ask code"):
             st.session_state.system_prompt += "\n\n" + refresh_docs()
             st.success("Codebase docs updated!")
-
-        # --- status indicator
-        if st.button("push to git"):
-            with st.spinner("Pushing to GitHub…"):
-                try:
-                    from app.push_to_github import main as push_main
-                    push_main()
-                    st.session_state.has_pushed = True
-                    st.success("✅ Repository pushed to GitHub.")
-                except Exception as exc:
-                    st.error(f"❌ Push failed: {exc}")
-
-        status = "✅ Pushed" if st.session_state.has_pushed else "⚠️ Not pushed"
-        st.markdown(f"{status}")
-
-        # --- session selector
-        session_options = ["new"] + get_session_ids()
-        selected = st.selectbox("Choose a session", session_options)
-        if selected != "new":
-            st.session_state["session_id"] = selected
-            st.rerun()
-
-        # --- list of tools
-        for t in TOOLS:
-            st.markdown(f"{t.name}")
-
-        
-
+            
     # Load conversation
     session_id = st.session_state.get("session_id", str(uuid.uuid4()))
     history = load_history(session_id)
