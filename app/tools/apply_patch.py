@@ -205,18 +205,6 @@ def _equals_slice(
     return True
 
 def _find_context(lines: list[str], context: list[str], start: int, eof: bool) -> Match:
-    """Locate the context block in ``lines``.
-
-    The original implementation performed a single forward search with three
-    tiers of tolerance (exact, ignore trailing whitespace, ignore all
-    whitespace).  The reference implementation (``A``) prefers an EOF‑based
-    match when the ``eof`` flag is set.
-
-    This updated version first attempts an EOF‑based search (if ``eof`` is
-    true), then falls back to the original tiered forward search.  The
-    tiered search logic is unchanged, preserving B’s whitespace tolerance
-    while adding the EOF priority from A.
-    """
     if not context:
         return Match(start, 0)
 
@@ -249,8 +237,19 @@ def _apply_chunks(input_str: str, chunks: list[Chunk], newline: str) -> str:
     orig_lines = input_str.split("\n")
     dest_lines, cursor = [], 0
     for chunk in chunks:
+
+        if chunk.orig_index > len(orig_lines):
+            raise ValueError(
+                f"_apply_chunks: chunk.origIndex {chunk.orig_index} > input length {len(orig_lines)}"
+            )
+        if cursor > chunk.orig_index:
+            raise ValueError(
+                f"_apply_chunks: overlapping chunk at {chunk.orig_index} (cursor {cursor})"
+            )
+
         dest_lines.extend(orig_lines[cursor : chunk.orig_index])
-        dest_lines.extend(chunk.ins_lines)
+        if chunk.ins_lines:
+            dest_lines.extend(chunk.ins_lines)
         cursor = chunk.orig_index + len(chunk.del_lines)
     dest_lines.extend(orig_lines[cursor:])
     return newline.join(dest_lines)
