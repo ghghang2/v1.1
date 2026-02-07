@@ -162,6 +162,8 @@ def _read_section(lines: list[str], start_index: int) -> ReadSectionResult:
         raw = lines[index]
         if any(raw.startswith(term) for term in END_SECTION_MARKERS) or raw == "***":
             break
+        if raw.startswith("@@"):
+            break
         index += 1
         line = raw if raw else " "
         prefix = line[0]

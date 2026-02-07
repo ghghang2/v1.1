@@ -91,6 +91,8 @@ def main() -> None:
     st.session_state.setdefault("system_prompt", DEFAULT_SYSTEM_PROMPT)
     st.session_state.setdefault("repo_docs", "")
     st.session_state.setdefault("has_pushed", False)
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
 
     # Sidebar
     with st.sidebar:
@@ -124,9 +126,10 @@ def main() -> None:
             st.success("Codebase docs updated!")
             
     # Load conversation
-    session_id = st.session_state.get("session_id", str(uuid.uuid4()))
-    history = load_history(session_id)
-    st.session_state.history = history
+    session_id = st.session_state.session_id
+    if not st.session_state.history:
+        st.session_state.history = load_history(session_id)
+    history = st.session_state.history
 
     # Render past messages
     for role, content, tool_id, tool_name, tool_args in history:
@@ -149,12 +152,13 @@ def main() -> None:
         with st.chat_message("assistant"):
             assistant_text, tool_calls, finished, reasoning_text = stream_and_collect(client, msgs, tools)
 
-            # appending reasoning to history
-            history.append(("analysis", reasoning_text))
+            # Store reasoning and assistant reply using the 5‑tuple format
+            # that matches the history schema.
+            history.append(("analysis", reasoning_text, "", "", ""))
             log_message(session_id, "analysis", reasoning_text)
 
-            if assistant_text: # sometimes, if reasoning assistant_text comes back empty
-                history.append(("assistant", assistant_text))
+            if assistant_text:
+                history.append(("assistant", assistant_text, "", "", ""))
                 log_message(session_id, "assistant", assistant_text)
                 
         if tool_calls and not finished:

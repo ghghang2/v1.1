@@ -6,34 +6,33 @@ the UI entry point small and makes the chat logic easier to unit‑test.
 
 Functions
 ---------
-* :func:`build_messages` — convert a conversation history into the
+* :func:`build_messages` – convert a conversation history into the
   list of messages expected by the OpenAI chat completion endpoint.
-* :func:`stream_and_collect` — stream the assistant response while
+* :func:`stream_and_collect` – stream the assistant response while
   capturing any tool calls.
-* :func:`process_tool_calls` — invoke the tools requested by the model
+* :func:`process_tool_calls` – invoke the tools requested by the model
   and generate subsequent assistant turns.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Tuple, Optional
+import logging
+import time
+import concurrent.futures
+from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
 
 from .config import MODEL_NAME
 from .tools import TOOLS
-import time
-import concurrent.futures
-import logging
-from .db import log_tool_msg, log_message
+from .db import log_message, log_tool_msg
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    # handlers=[logging.StreamHandler()],  # writes to stdout (the Streamlit console)
-    filename='chat.log',
+    filename="chat.log",
 )
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,8 @@ def build_messages(
     Parameters
     ----------
     history
-        List of ``(user, assistant)`` pairs that have already happened.
+        List of ``(user, assistant, tool_id, tool_name, tool_args)``
+        tuples that have already happened.
     system_prompt
         The system message that sets the model behaviour.
     user_input
@@ -61,19 +61,23 @@ def build_messages(
 
     for role, content, tool_id, tool_name, tool_args in history:
         if tool_name:
-            msgs.append({
-                "role": role, 
-                "content": "",
-                "tool_calls": [{
+            msgs.append(
+                {
+                    "role": role,
+                    "content": "",
+                    "tool_calls": [
+                        {
                             "id": tool_id,
                             "type": "function",
                             "function": {
                                 "name": tool_name,
                                 "arguments": tool_args or "{}",
                             },
-                        }]
-                    })
-        elif role == 'tool':
+                        }
+                    ],
+                }
+            )
+        elif role == "tool":
             msgs.append({"role": role, "content": content, "tool_call_id": tool_id})
         else:
             msgs.append({"role": role, "content": content})
@@ -92,9 +96,9 @@ def stream_and_collect(
     """Stream the assistant response while capturing tool calls.
 
     The function writes the incremental assistant content to a placeholder
-     and returns a tuple of the complete
-    assistant text and a list of tool calls (or ``None`` if no tool call
-    was emitted).
+    and returns a tuple of the complete assistant text, a list of tool
+    calls (or ``None`` if no tool call was emitted), a boolean indicating
+    if the assistant finished, and any reasoning text.
     """
     stream = client.chat.completions.create(
         model=MODEL_NAME,
@@ -118,22 +122,20 @@ def stream_and_collect(
         delta = choice.delta
 
         if "metrics_placeholder" in st.session_state:
-                st.session_state.metrics_placeholder.markdown(
-                    st.session_state.latest_metrics_md
-                )
+            st.session_state.metrics_placeholder.markdown(
+                st.session_state.latest_metrics_md
+            )
 
-        reasoning_part = delta.reasoning_content if hasattr(delta, 'reasoning_content') else None
+        reasoning_part = getattr(delta, "reasoning_content", None)
         if reasoning_part:
             reasoning_text += reasoning_part
             md = f"<details open><summary>Reasoning</summary>\n{reasoning_text}\n</details>"
             reasoning_placeholder.markdown(md, unsafe_allow_html=True)
 
-        # Regular text
         if delta.content:
             assistant_text += delta.content
             placeholder.markdown(assistant_text, unsafe_allow_html=True)
 
-        # Tool calls — accumulate arguments per call id.
         if delta.tool_calls:
             for tc_delta in delta.tool_calls:
                 idx = tc_delta.index
@@ -154,16 +156,14 @@ def process_tool_calls(
     client: Any,
     messages: List[Dict[str, Any]],
     session_id: str,
-    history: List[Tuple[str, str]],
+    history: List[Tuple[str, str, str, str, str]],
     tools: List[Dict[str, Any]],
     tool_calls: Optional[List[Dict[str, Any]]],
     finished: bool,
     assistant_text: str = "",
     reasoning_text: str = "",
-) -> str:
-    """
-    Execute each tool that the model requested and keep asking the model
-    for further replies until it stops calling tools.
+) -> List[Tuple[str, str, str, str, str]]:
+    """Execute each tool that the model requested.
 
     Parameters
     ----------
@@ -172,34 +172,39 @@ def process_tool_calls(
     messages
         The conversation history that will be extended with the tool‑call
         messages and the tool replies.
+    session_id
+        Identifier of the chat session.
+    history
+        Mutable list of ``(role, content, tool_id, tool_name, tool_args)``
+        tuples used to build the chat history.
     tools
-        The list of OpenAI‑compatible tool definitions that will be passed
-        to the ``chat.completions.create`` call.
+        The list of OpenAI‑compatible tool definitions.
     tool_calls
-        The list of tool‑call objects produced by
-        :func:`stream_and_collect`.  The function may return a new
-        list of calls that the model wants to make after the tool
-        result is sent back.
+        The list of tool‑call objects produced by :func:`stream_and_collect`.
     finished
         Boolean indicating whether the assistant already finished a turn.
+    assistant_text
+        Text that the assistant returned before the first tool call.
+    reasoning_text
+        Any reasoning content produced by the model.
 
     Returns
     -------
-    str
-        The cumulative assistant reply **including** the text produced
-        by the tool calls.
+    list
+        Updated history list.
     """
     if not tool_calls:
-        return ""
+        return history
 
-    # Accumulate all text that the assistant will eventually produce
-    full_text = assistant_text + reasoning_text
+    # Preserve any assistant text and reasoning that were produced before
+    # the first tool call – the original code discarded this content.
+    if assistant_text:
+        history.append(("assistant", assistant_text, "", "", ""))
+    if reasoning_text:
+        history.append(("analysis", reasoning_text, "", "", ""))
 
-    # We keep looping until the model stops asking for tools
     while tool_calls and not finished:
-        
         for tc in tool_calls:
-            
             try:
                 args = json.loads(tc.get("arguments") or "{}")
             except Exception as exc:
@@ -207,25 +212,18 @@ def process_tool_calls(
                 result = f"\u274c  JSON error: {exc}"
                 logger.exception("Failed to parse tool arguments", exc_info=True)
             else:
-
                 logger.info(
                     "Calling tool %s with arguments %s",
                     tc.get("name"),
                     json.dumps(args),
                 )
-
-                start = time.time()
-
-                func = next(
-                    (t.func for t in TOOLS if t.name == tc.get("name")), None
-                )
-
+                func = next((t.func for t in TOOLS if t.name == tc.get("name")), None)
                 if func:
                     try:
                         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                         try:
                             future = executor.submit(func, **args)
-                            result = future.result(timeout=10)  # 10‑second timeout
+                            result = future.result(timeout=10)
                         except concurrent.futures.TimeoutError:  # pragma: no cover
                             result = (
                                 "\u26d4  Tool call timed out after 10 seconds. "
@@ -234,14 +232,13 @@ def process_tool_calls(
                         except Exception as exc:  # pragma: no cover
                             result = f"\u274c  Tool error: {exc}"
                         finally:
-                            # Avoid blocking on thread shutdown.
                             executor.shutdown(wait=False)
                     except Exception as exc:  # pragma: no cover
                         result = f"\u274c  Tool error: {exc}"
                         logger.exception("Tool raised an exception", exc_info=True)
                 else:
                     result = f"\u26a0\ufe0f  Unknown tool '{tc.get('name')}'"
-                    
+
             preview = result[:10] + ("\u2026" if len(result) > 10 else "")
             tool_block = (
                 f"<details>"
@@ -249,9 +246,8 @@ def process_tool_calls(
                 f"\n\n`{result}`\n\n"
                 f"</details>"
             )
-            tool_placeholder = st.empty()
-            tool_placeholder.markdown(tool_block, unsafe_allow_html=True)
-            
+            st.empty().markdown(tool_block, unsafe_allow_html=True)
+
             tool_id = tc.get("id")
             tool_name = tc.get("name")
             tool_args = tc.get("arguments")
@@ -279,24 +275,19 @@ def process_tool_calls(
                 }
             )
 
-            # appending tool call to history
             history.append(("assistant", "", tool_id, tool_name, tool_args))
             history.append(("tool", result, tool_id, tool_name, tool_args))
 
             log_tool_msg(session_id, tool_id, tool_name, tool_args, result)
-            
-            
+
         new_assistant_resp, new_tool_calls, finished, reasoning_text = stream_and_collect(
             client, messages, tools
         )
 
-        # appending reasoning to history
-        history.append(("analysis", reasoning_text))
-        history.append(("assistant", new_assistant_resp))
-
+        history.append(("analysis", reasoning_text, "", "", ""))
+        history.append(("assistant", new_assistant_resp, "", "", ""))
         log_message(session_id, "analysis", reasoning_text)
         log_message(session_id, "assistant", new_assistant_resp)
-        
         tool_calls = new_tool_calls or None
-            
+
     return history
