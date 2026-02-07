@@ -68,9 +68,21 @@ def is_repo_up_to_date(repo_path: Path) -> bool:
 # Streamlit UI entry point
 
 def main() -> None:
+    # Inject custom CSS to disable the anchor-based auto-scroll
     st.markdown(
         """
         <style>
+        /* Target the scrollable container */
+        .stMain {
+            overflow: auto !important;
+            scroll-behavior: auto !important;
+        }
+
+        /* Disable the 'anchor' that Streamlit uses to force scroll-to-bottom */
+        div[data-testid="stChatMessageContainer"] {
+            overflow-anchor: none !important;
+        }
+
         /* force the sidebar wrapper to be 100 px */
         .stSidebar { width: 150px !important; }
 
@@ -81,8 +93,9 @@ def main() -> None:
         .stSidebar .css-1v0mbdj { padding: 0 !important; }
         </style>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
+    
     st.set_page_config(page_title="Chat with GPT\u2011OSS", layout="wide")
     REPO_PATH = Path(__file__).parent
 
@@ -149,6 +162,8 @@ def main() -> None:
         tools = get_tools()
         msgs = build_messages(history, st.session_state.system_prompt, user_input)
 
+        # Prevent the assistant message from snapping to bottom during
+        # streaming by disabling auto‑scroll.
         with st.chat_message("assistant"):
             assistant_text, tool_calls, finished, reasoning_text = stream_and_collect(client, msgs, tools)
 
