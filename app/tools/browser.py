@@ -10,7 +10,7 @@ from typing import Any, Optional
 sync_playwright: Any | None = None
 
 # ---------------------------------------------------------------------------
-# BrowserManager – thin wrapper around Playwright
+# BrowserManager - thin wrapper around Playwright
 # ---------------------------------------------------------------------------
 
 class BrowserManager:
@@ -73,28 +73,92 @@ class BrowserManager:
     # ---------------------------------------------------------------------
     def navigate(self, url: str, timeout: int = 30_000) -> dict:
         if not self.page:
-            raise RuntimeError("Browser not started – call start() first")
+            raise RuntimeError("Browser not started \u2013 call start() first")
         self.page.goto(url, timeout=timeout)
         return {"url": url}
 
     def screenshot(self, path: str, full_page: bool = True, **kwargs) -> dict:
         if not self.page:
-            raise RuntimeError("Browser not started – call start() first")
+            raise RuntimeError("Browser not started \u2013 call start() first")
         img = self.page.screenshot(full_page=full_page, **kwargs)
         Path(path).write_bytes(img)
         return {"path": path}
 
     def click(self, selector: str, **kwargs) -> dict:
         if not self.page:
-            raise RuntimeError("Browser not started – call start() first")
+            raise RuntimeError("Browser not started \u2013 call start() first")
         self.page.click(selector, **kwargs)
         return {"selector": selector}
 
     def type_text(self, selector: str, text: str, **kwargs) -> dict:
         if not self.page:
-            raise RuntimeError("Browser not started – call start() first")
+            raise RuntimeError("Browser not started \u2013 call start() first")
         self.page.fill(selector, text, **kwargs)
         return {"selector": selector, "text": text}
+
+    # ---------------------------------------------------------------------
+    # Helper utilities for generic extraction
+    # ---------------------------------------------------------------------
+    def _elements(self, selector: str):
+        """Return Playwright element handles for a selector.
+
+        Raises RuntimeError if no elements found.
+        """
+        if not self.page:
+            raise RuntimeError("Browser not started \u2013 call start() first")
+        handles = self.page.locator(selector).element_handles()
+        if not handles:
+            raise RuntimeError(f"No elements found for selector: {selector}")
+        return handles
+
+    def extract(self, selector: str, *, mode: str = "text", multiple: bool = False, attr: str | None = None):
+        """Extract content from the page.
+
+        Parameters
+        ----------
+        selector:
+            CSS selector for the elements to extract.
+        mode:
+            ``text`` (default) returns ``innerText``, ``html`` returns
+            ``innerHTML`` and ``attribute`` returns the named attribute.
+        multiple:
+            If True return a list of all matches.
+        attr:
+            The attribute name when ``mode == "attribute"``.
+        """
+        handles = self._elements(selector)
+        def _value(h):
+            if mode == "text":
+                return h.text_content() or ""
+            if mode == "html":
+                return h.inner_html() or ""
+            if mode == "attribute":
+                if not attr:
+                    raise ValueError("attr must be supplied for mode='attribute'")
+                return h.get_attribute(attr) or ""
+            raise ValueError(f"Unsupported mode: {mode}")
+        values = [_value(h) for h in handles]
+        return values if multiple else values[0]
+
+    def evaluate(self, script: str, args: list | None = None):
+        """Run arbitrary JS in the page context and return the result."""
+        if not self.page:
+            raise RuntimeError("Browser not started \u2013 call start() first")
+        if args is None:
+            args = []
+        return self.page.evaluate(script, *args)
+
+    def wait_for(self, selector: str | None = None, timeout: int = 30_000):
+        """Wait until an element matching *selector* appears or until *timeout*.
+
+        If *selector* is None, waits for network idle.
+        """
+        if not self.page:
+            raise RuntimeError("Browser not started \u2013 call start() first")
+        if selector:
+            self.page.wait_for_selector(selector, timeout=timeout)
+        else:
+            self.page.wait_for_load_state("networkidle", timeout=timeout)
 
 # ---------------------------------------------------------------------------
 # Public function for OpenAI function calling
@@ -103,7 +167,7 @@ class BrowserManager:
 _mgr: BrowserManager | None = None
 
 
-def browser(action: str, *, url: str | None = None, path: str | None = None, selector: str | None = None, text: str | None = None, headless: bool | None = None, user_data_dir: str | None = None, proxy: str | None = None, timeout: int | None = None) -> str:
+def browser(action: str, *, url: str | None = None, path: str | None = None, selector: str | None = None, text: str | None = None, headless: bool | None = None, user_data_dir: str | None = None, proxy: str | None = None, timeout: int | None = None, **kwargs) -> str:
     """Perform a browser action.
 
     Parameters
@@ -127,45 +191,67 @@ def browser(action: str, *, url: str | None = None, path: str | None = None, sel
     try:
         if action == "start":
             if _mgr is None:
-                _mgr = BrowserManager(
-                    headless=headless if headless is not None else True,
-                    user_data_dir=user_data_dir,
-                    proxy=proxy,
-                )
+                _mgr = BrowserManager(headless=headless if headless is not None else True, user_data_dir=user_data_dir, proxy=proxy)
             _mgr.start()
             return json.dumps({"result": {"action": "start", "status": "ok"}})
+
         if _mgr is None:
             return json.dumps({"error": "Browser not started. Call start first."})
+
         if action == "stop":
             _mgr.stop()
             _mgr = None
             return json.dumps({"result": {"action": "stop", "status": "ok"}})
+
         if action == "navigate":
             if not url:
                 raise ValueError("url is required for navigate")
             _mgr.navigate(url, timeout=timeout or 30_000)
             return json.dumps({"result": {"action": "navigate", "url": url}})
+
+        if action == "wait_for":
+            sel = kwargs.get("selector")
+            to = kwargs.get("timeout", 30_000)
+            _mgr.wait_for(selector=sel, timeout=to)
+            return json.dumps({"result": {"action": "wait_for", "selector": sel}})
+
+        if action == "extract":
+            sel = kwargs.get("selector")
+            mode = kwargs.get("mode", "text")
+            multiple = kwargs.get("multiple", False)
+            attr = kwargs.get("attr")
+            if not sel:
+                raise ValueError("selector is required for extract")
+            res = _mgr.extract(sel, mode=mode, multiple=multiple, attr=attr)
+            return json.dumps({"result": {"action": "extract", "result": res}})
+
+        if action == "evaluate":
+            script = kwargs.get("script")
+            args = kwargs.get("args", [])
+            if not script:
+                raise ValueError("script is required for evaluate")
+            res = _mgr.evaluate(script, args=args)
+            return json.dumps({"result": {"action": "evaluate", "result": res}})
+
         if action == "screenshot":
             if not path:
                 raise ValueError("path is required for screenshot")
-            _mgr.screenshot(path)
+            full_page = kwargs.get("full_page", True)
+            _mgr.screenshot(path, full_page=full_page)
             return json.dumps({"result": {"action": "screenshot", "path": path}})
+
         if action == "click":
             if not selector:
                 raise ValueError("selector is required for click")
             _mgr.click(selector)
             return json.dumps({"result": {"action": "click", "selector": selector}})
+
         if action == "type":
             if not selector or text is None:
                 raise ValueError("selector and text are required for type")
             _mgr.type_text(selector, text)
             return json.dumps({"result": {"action": "type", "selector": selector, "text": text}})
-        # New action to retrieve current page HTML
-        if action == "get_html":
-            if not _mgr.page:
-                raise RuntimeError("Browser not started \u2013 call start() first")
-            html = _mgr.page.content()
-            return json.dumps({"result": {"action": "get_html", "html": html}})
+
         return json.dumps({"error": f"Unknown action '{action}'"})
     except Exception as exc:
         return json.dumps({"error": str(exc)})
@@ -176,13 +262,14 @@ def browser(action: str, *, url: str | None = None, path: str | None = None, sel
 
 name = "browser"
 func = browser
-description = "Control a browser: start, stop, navigate, screenshot, click, type."
-# Provide a custom schema so optional fields are optional
+
+description = "Control a browser: start, stop, navigate, screenshot, click, type, wait_for, extract, evaluate."
+
 schema = {
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["start", "stop", "navigate", "screenshot", "click", "type", "get_html"]},
+            "action": {"type": "string", "enum": ["start", "stop", "navigate", "screenshot", "click", "type", "wait_for", "extract", "evaluate"]},
             "url": {"type": "string"},
             "path": {"type": "string"},
             "selector": {"type": "string"},
@@ -201,7 +288,6 @@ schema = {
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Simple manual test
     import sys
     if len(sys.argv) < 2:
         print("Usage: python -m app.tools.browser start|stop|navigate|screenshot|click|type ...")
