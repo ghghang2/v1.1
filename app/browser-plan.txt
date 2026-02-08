@@ -1,0 +1,8 @@
+- [ ] Create a plan file (browser-plan.txt) with tasks.
+- [ ] Add Playwright as a dependency.
+- [ ] Implement a BrowserManager class to launch Firefox in a controlled profile.
+- [ ] Implement start_browser and stop_browser functions.
+- [ ] Implement navigate, screenshot, click, and type_text actions.
+- [ ] Provide a simple CLI wrapper to call these actions.
+- [ ] Add basic tests or example usage.
+- [ ] Document the API in README or docstring.
