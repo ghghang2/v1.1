@@ -2,10 +2,13 @@
 
 import json
 import os
+import sys
+from pathlib import Path
 import tempfile
 from unittest.mock import patch
 
-# Import the module under test
+# Ensure repository root is on sys.path for imports
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 import app.tools.browser as browser_tool
 
 # Helper to parse JSON result
@@ -33,19 +36,26 @@ class DummyContext:
         pass
 
 class DummyBrowser:
+    def launch(self, **kwargs):
+        # In real Playwright, launch returns a Browser object.
+        return self
     def close(self):
         pass
     def new_context(self, **kwargs):
         return DummyContext()
 
 class DummyPlaywright:
-    def firefox(self):
-        return DummyBrowser()
+    def __init__(self):
+        self.firefox = DummyBrowser()
     def stop(self):
         pass
 
-# Patch sync_playwright to return our dummy playwright
-@patch('app.tools.browser.sync_playwright', return_value=DummyPlaywright())
+# Patch sync_playwright to return a dummy that mimics the real API
+class DummySyncPlaywright:
+    def start(self):
+        return DummyPlaywright()
+
+@patch('app.tools.browser.sync_playwright', return_value=DummySyncPlaywright())
 class TestBrowserTool:
     def test_start_and_stop(self, mock_sync):
         # Ensure start returns ok
