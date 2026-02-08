@@ -4,15 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from playwright.sync_api import (
-    Browser,
-    BrowserContext,
-    Page,
-    Playwright,
-    sync_playwright,
-)
+# Lazy import of Playwright; the module-level variable will be patched in tests.
+sync_playwright: Any | None = None
 
 # ---------------------------------------------------------------------------
 # BrowserManager – thin wrapper around Playwright
@@ -35,14 +30,18 @@ class BrowserManager:
         self.headless = headless
         self.user_data_dir = user_data_dir
         self.proxy = proxy
-        self.playwright: Optional[Playwright] = None
-        self.browser: Optional[Browser] = None
-        self.context: Optional[BrowserContext] = None
-        self.page: Optional[Page] = None
+        self.playwright: Any | None = None
+        self.browser: Any | None = None
+        self.context: Any | None = None
+        self.page: Any | None = None
 
     def start(self) -> None:
         if self.browser:
             return  # already started
+        global sync_playwright
+        if sync_playwright is None:
+            from playwright.sync_api import sync_playwright as _sp
+            sync_playwright = _sp
         self.playwright = sync_playwright().start()
         launch_args: dict = {
             "headless": self.headless,
@@ -72,27 +71,30 @@ class BrowserManager:
     # ---------------------------------------------------------------------
     # Browser actions
     # ---------------------------------------------------------------------
-    def navigate(self, url: str, timeout: int = 30_000) -> None:
+    def navigate(self, url: str, timeout: int = 30_000) -> dict:
         if not self.page:
             raise RuntimeError("Browser not started – call start() first")
         self.page.goto(url, timeout=timeout)
+        return {"url": url}
 
-    def screenshot(self, path: str, full_page: bool = True, **kwargs) -> bytes:
+    def screenshot(self, path: str, full_page: bool = True, **kwargs) -> dict:
         if not self.page:
             raise RuntimeError("Browser not started – call start() first")
         img = self.page.screenshot(full_page=full_page, **kwargs)
         Path(path).write_bytes(img)
-        return img
+        return {"path": path}
 
-    def click(self, selector: str, **kwargs) -> None:
+    def click(self, selector: str, **kwargs) -> dict:
         if not self.page:
             raise RuntimeError("Browser not started – call start() first")
         self.page.click(selector, **kwargs)
+        return {"selector": selector}
 
-    def type_text(self, selector: str, text: str, **kwargs) -> None:
+    def type_text(self, selector: str, text: str, **kwargs) -> dict:
         if not self.page:
             raise RuntimeError("Browser not started – call start() first")
         self.page.fill(selector, text, **kwargs)
+        return {"selector": selector, "text": text}
 
 # ---------------------------------------------------------------------------
 # Public function for OpenAI function calling
@@ -193,17 +195,11 @@ schema = {
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Browser tool CLI")
-    parser.add_argument("action", choices=["start", "stop", "navigate", "screenshot", "click", "type"], help="Action to perform")
-    parser.add_argument("--url")
-    parser.add_argument("--path")
-    parser.add_argument("--selector")
-    parser.add_argument("--text")
-    parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--user-data-dir")
-    parser.add_argument("--proxy")
-    parser.add_argument("--timeout", type=int)
-    ns = parser.parse_args()
-    print(browser(ns.action, url=ns.url, path=ns.path, selector=ns.selector, text=ns.text, headless=ns.headless, user_data_dir=ns.user_data_dir, proxy=ns.proxy, timeout=ns.timeout))
+    # Simple manual test
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: python -m app.tools.browser start|stop|navigate|screenshot|click|type ...")
+        sys.exit(1)
+    action = sys.argv[1]
+    params = {k: v for k, v in (p.split('=') for p in sys.argv[2:])}
+    print(browser(action, **params))
