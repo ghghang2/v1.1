@@ -70,10 +70,19 @@ def apply_diff(input_str: str, diff: str, mode: ApplyDiffMode = "default") -> st
     normalized_input = input_str.replace("\r\n", "\n")
     parsed_chunks, total_fuzz = _parse_update_diff(diff_lines, normalized_input)
     return _apply_chunks(normalized_input, parsed_chunks, newline=newline)
-
+def _trim_overlap(ins_lines: list[str], following_lines: list[str]) -> list[str]:
+    """
+    Trims the end of ins_lines if they already exist at the start of following_lines.
+    Prevents duplicate 'stitching' when the diff and file overlap.
+    """
+    max_check = min(len(ins_lines), len(following_lines))
+    for i in range(max_check, 0, -1):
+        if ins_lines[-i:] == following_lines[:i]:
+            return ins_lines[:-i]
+    return ins_lines
 def _normalize_diff_lines(diff: str) -> list[str]:
     """Clean the diff and strip Unified Diff metadata headers."""
-    raw_lines = [line.rstrip("\r") for line in re.split(r"\r?\n", diff)]
+    raw_lines = [line.rstrip("\r") for line in re.split(r"\r?\n", diff.strip())]
     
     clean_lines = []
     for line in raw_lines:
@@ -136,18 +145,48 @@ def _parse_update_diff(lines: list[str], input_str: str):
         match = _find_context(input_lines, section.next_context, cursor, section.eof)
         
         if match.new_index == -1:
+            if section.section_chunks:
+                first_chunk_ins = section.section_chunks[0].ins_lines
+                already_applied_match = _find_context(input_lines, first_chunk_ins, cursor, section.eof)
+                if already_applied_match.new_index != -1:
+                    parser.index = section.end_index
+                    cursor = already_applied_match.new_index + len(first_chunk_ins)
+                    continue
             ctx_text = "\n".join(section.next_context)
             if section.eof:
                 raise ValueError(f"Invalid EOF Context {cursor}:\n{ctx_text}")
             raise ValueError(f"Invalid Context {cursor}:\n{ctx_text}")
 
-        cursor = match.new_index + len(section.next_context)
+        match_start_index = match.new_index
         parser.fuzz += match.fuzz
         parser.index = section.end_index
 
         for ch in section.section_chunks:
-            chunks.append(Chunk(orig_index=ch.orig_index + match.new_index,
-                                del_lines=list(ch.del_lines), ins_lines=list(ch.ins_lines)))
+            abs_orig_index = ch.orig_index + match_start_index
+            
+            # 1. Identify what comes immediately AFTER the lines we are deleting
+            after_del_index = abs_orig_index + len(ch.del_lines)
+            # We look ahead by the length of our insertion to check for overlaps
+            following_lines = input_lines[after_del_index : after_del_index + len(ch.ins_lines)]
+            
+            # 2. Trim the insertion if it 'stutters' into the existing code
+            # In your example: ins_lines=['A', '#5', '#5'], following=['#5']
+            # _trim_overlap will return ['A', '#5']
+            final_ins = _trim_overlap(ch.ins_lines, following_lines)
+            
+            # 3. Idempotency check: If after trimming, the insertion matches the 
+            # deletion, it's a No-Op. Skip it.
+            if final_ins == ch.del_lines:
+                continue
+
+            chunks.append(Chunk(
+                orig_index=abs_orig_index,
+                del_lines=list(ch.del_lines),
+                ins_lines=list(final_ins)
+            ))
+            
+        cursor = match_start_index + len(section.next_context)
+
     return chunks, parser.fuzz
 
 def _advance_cursor(anchor: str, lines: list[str], cursor: int, parser: ParserState) -> int:
