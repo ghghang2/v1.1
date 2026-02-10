@@ -281,7 +281,7 @@ def process_tool_calls(
                     try:
                         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                         try:
-                            if tool_name=='browser':
+                            if tool_name in ['browser', 'run_tests']:
                                 timeout_sec = 60
                             else: 
                                 timeout_sec = 10
@@ -289,7 +289,7 @@ def process_tool_calls(
                             result = future.result(timeout=timeout_sec)
                         except concurrent.futures.TimeoutError:  # pragma: no cover
                             result = (
-                                f"\u26d4  Tool call timed out after {timeout_sec} seconds. "
+                                f"\u26d4  Tool call {tool_name} timed out after {timeout_sec} seconds. "
                                 "Try a shorter or more specific request."
                             )
                         except Exception as exc:  # pragma: no cover
