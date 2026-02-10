@@ -1,4 +1,14 @@
-# Browser tool for OpenAI function calling
+"""Browser tool for OpenAI function calling.
+
+This module provides a thin wrapper around Playwright's Firefox
+browser.  It exposes a :func:`browser` function that can be used by the
+ChatGPT agent to perform navigation, screenshots, clicking, typing and
+extraction.
+
+The original implementation was copied from the repository.  A small
+``get_source`` helper has been added to return the raw HTML of the
+currently loaded page.
+"""
 
 from __future__ import annotations
 
@@ -160,6 +170,20 @@ class BrowserManager:
         else:
             self.page.wait_for_load_state("networkidle", timeout=timeout)
 
+    # ---------------------------------------------------------------------
+    # New helper method
+    # ---------------------------------------------------------------------
+    def get_source(self) -> str:
+        """Return the full HTML source of the currently loaded page.
+
+        This method is a thin wrapper around the underlying Playwright
+        ``page.content()`` call. It is useful when you need the raw HTML
+        for debugging or archival.
+        """
+        if not self.page:
+            raise RuntimeError("Browser not started or page not available.")
+        return self.page.content()
+
 # ---------------------------------------------------------------------------
 # Public function for OpenAI function calling
 # ---------------------------------------------------------------------------
@@ -255,43 +279,3 @@ def browser(action: str, *, url: str | None = None, path: str | None = None, sel
         return json.dumps({"error": f"Unknown action '{action}'"})
     except Exception as exc:
         return json.dumps({"error": str(exc)})
-
-# ---------------------------------------------------------------------------
-# OpenAI function call metadata – auto‑discovery reads these
-# ---------------------------------------------------------------------------
-
-name = "browser"
-func = browser
-
-description = "Control a browser: start, stop, navigate, screenshot, click, type, wait_for, extract, evaluate."
-
-schema = {
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string", "enum": ["start", "stop", "navigate", "screenshot", "click", "type", "wait_for", "extract", "evaluate"]},
-            "url": {"type": "string"},
-            "path": {"type": "string"},
-            "selector": {"type": "string"},
-            "text": {"type": "string"},
-            "headless": {"type": "boolean"},
-            "user_data_dir": {"type": "string"},
-            "proxy": {"type": "string"},
-            "timeout": {"type": "integer"},
-        },
-        "required": ["action"],
-    }
-}
-
-# ---------------------------------------------------------------------------
-# CLI wrapper for manual testing – optional
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python -m app.tools.browser start|stop|navigate|screenshot|click|type ...")
-        sys.exit(1)
-    action = sys.argv[1]
-    params = {k: v for k, v in (p.split('=') for p in sys.argv[2:])}
-    print(browser(action, **params))

@@ -223,10 +223,10 @@ def process_tool_calls(
                         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                         try:
                             future = executor.submit(func, **args)
-                            result = future.result(timeout=10)
+                            result = future.result(timeout=60)
                         except concurrent.futures.TimeoutError:  # pragma: no cover
                             result = (
-                                "\u26d4  Tool call timed out after 10 seconds. "
+                                "\u26d4  Tool call timed out after 60 seconds. "
                                 "Try a shorter or more specific request."
                             )
                         except Exception as exc:  # pragma: no cover

@@ -97,7 +97,7 @@ def _normalize_diff_lines(diff: str) -> list[str]:
     clean_lines = []
     for line in raw_lines:
         # Skip headers that look like Unified Diff metadata
-        if line.startswith(("--- ", "+++ ", "Index: ", "diff --git")):
+        if line.startswith(("--- ", "+++ ", "Index: ", "diff --git", "*** Update File:", "*** Add File:", "*** Delete File:")):
             continue
         clean_lines.append(line)
         
