@@ -57,18 +57,80 @@ def browser(url: str, actions: Optional[List[Dict[str, Any]]] = None, selector: 
         return json.dumps({"error": "URL is required."})
 
     # --- 2. STATELESS EXECUTION (Fixes the "thread" error) ---
-    try:
-        with sync_playwright() as p:
-            # Launch fresh for every single call
-            browser = p.firefox.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            )
-            page = context.new_page()
+    import threading
+
+    result_container = {"result": None, "error": None}
+
+    def run_sync():
+        try:
+            with sync_playwright() as p:
+                browser = p.firefox.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                )
+                page = context.new_page()
+                # Navigate
+                try:
+                    page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                except Exception as e:
+                    result_container["error"] = f"Navigation failed: {str(e)}"
+                    return
+                # Perform Actions (if any)
+                interaction_log = []
+                if actions:
+                    for act in actions:
+                        act_type = act.get("type")
+                        try:
+                            if act_type == "click":
+                                page.click(act["selector"], timeout=5000)
+                                interaction_log.append(f"Clicked {act['selector']}")
+                            elif act_type == "type":
+                                page.fill(act["selector"], act["text"], timeout=5000)
+                                interaction_log.append(f"Typed into {act['selector']}")
+                            elif act_type == "wait":
+                                if "selector" in act:
+                                    page.wait_for_selector(act["selector"], timeout=10000)
+                                elif "timeout" in act:
+                                    page.wait_for_timeout(act["timeout"])
+                                interaction_log.append(f"Waited for {act.get('selector') or act.get('timeout')}")
+                            elif act_type == "screenshot":
+                                path = act.get("path", "screenshot.png")
+                                page.screenshot(path=path)
+                                interaction_log.append(f"Screenshot saved to {path}")
+                        except Exception as e:
+                            interaction_log.append(f"Error during {act_type}: {str(e)}")
+                # Extract Content
+                content = ""
+                if selector:
+                    try:
+                        page.wait_for_selector(selector, timeout=5000)
+                        elements = page.locator(selector).all_inner_texts()
+                        content = "\n".join(elements)
+                    except Exception as e:
+                        content = f"Element '{selector}' not found: {str(e)}"
+                else:
+                    content = page.evaluate("() => document.body.innerText")
+                browser.close()
+                result_container["result"] = json.dumps({
+                    "status": "success",
+                    "url": url,
+                    "interactions": interaction_log,
+                    "content": content[:5000]
+                })
+        except Exception as global_ex:
+            result_container["error"] = f"Browser tool error: {str(global_ex)}"
+
+    thread = threading.Thread(target=run_sync)
+    thread.start()
+    thread.join()
+
+    if result_container["error"]:
+        return json.dumps({"error": result_container["error"]})
+    return result_container["result"]
 
             # Navigate
             try:
-                page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                await page.goto(url, timeout=30000, wait_until="domcontentloaded")
             except Exception as e:
                 return json.dumps({"error": f"Navigation failed: {str(e)}"})
 
@@ -79,20 +141,20 @@ def browser(url: str, actions: Optional[List[Dict[str, Any]]] = None, selector: 
                     act_type = act.get("type")
                     try:
                         if act_type == "click":
-                            page.click(act["selector"], timeout=5000)
+                            await page.click(act["selector"], timeout=5000)
                             interaction_log.append(f"Clicked {act['selector']}")
                         elif act_type == "type":
-                            page.fill(act["selector"], act["text"], timeout=5000)
+                            await page.fill(act["selector"], act["text"], timeout=5000)
                             interaction_log.append(f"Typed into {act['selector']}")
                         elif act_type == "wait":
                             if "selector" in act:
-                                page.wait_for_selector(act["selector"], timeout=10000)
+                                await page.wait_for_selector(act["selector"], timeout=10000)
                             elif "timeout" in act:
-                                page.wait_for_timeout(act["timeout"])
+                                await page.wait_for_timeout(act["timeout"])
                             interaction_log.append(f"Waited for {act.get('selector') or act.get('timeout')}")
                         elif act_type == "screenshot":
                             path = act.get("path", "screenshot.png")
-                            page.screenshot(path=path)
+                            await page.screenshot(path=path)
                             interaction_log.append(f"Screenshot saved to {path}")
                     except Exception as e:
                         interaction_log.append(f"Error during {act_type}: {str(e)}")
@@ -102,16 +164,16 @@ def browser(url: str, actions: Optional[List[Dict[str, Any]]] = None, selector: 
             if selector:
                 try:
                     # Try to get specific element
-                    page.wait_for_selector(selector, timeout=5000)
-                    elements = page.locator(selector).all_inner_texts()
+                    await page.wait_for_selector(selector, timeout=5000)
+                    elements = await page.locator(selector).all_inner_texts()
                     content = "\n".join(elements)
-                except:
-                    content = f"Element '{selector}' not found."
+                except Exception as e:
+                    content = f"Element '{selector}' not found: {str(e)}"
             else:
                 # Default: Get the main readable text
-                content = page.evaluate("() => document.body.innerText")
+                content = await page.evaluate("() => document.body.innerText")
 
-            browser.close()
+            await browser.close()
             
             return json.dumps({
                 "status": "success",

@@ -16,18 +16,27 @@ from datetime import datetime
 # Location of the database file – one level up from this module
 DB_PATH = Path(__file__).resolve().parent.parent / "chat_history.db"
 
+# Optional in‑memory connection used by tests
+_conn: sqlite3.Connection | None = None
+
+def _get_conn() -> sqlite3.Connection:
+    if _conn is not None:
+        return _conn
+    return sqlite3.connect(DB_PATH)
+
 # ---------------------------------------------------------------------------
 #  Public helpers
 # ---------------------------------------------------------------------------
 
-def init_db() -> None:
+def init_db(conn: sqlite3.Connection | None = None) -> None:
     """Create the database file and the chat_log table if they do not exist.
 
     The function is idempotent – calling it repeatedly has no adverse
     effect.  It should be invoked once during application startup.
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
+    if conn is None:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chat_log (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
