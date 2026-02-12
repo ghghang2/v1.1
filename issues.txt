@@ -7,7 +7,8 @@
 The outbound queue receives simple dicts, whereas the supervisor expects `AgentEvent` instances. Although the current policy accepts either, the inconsistency is confusing and fragile for future extensions. **Status: ✅ Fixed**
 
 ## 3. Generic interjection message
-The policy only signals whether an interjection should occur; the supervisor always replies with a fixed apology string. The specific error context is lost, and the policy's utility is limited.
+The policy only signals whether an interjection should occur; the supervisor always replied with a fixed apology string. The specific error context was lost, limiting the policy's usefulness.
+**Status: ✅ Fixed**
 
 ## 4. Unused `_agent_target` helper in `SupervisorProcess`
 `_agent_target` returns an empty dictionary and is never invoked. The agent is started directly with its arguments, making the helper redundant.

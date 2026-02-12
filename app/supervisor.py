@@ -109,12 +109,13 @@ class SupervisorProcess(mp.Process):
             policy_decision = self.config.policy_func(event)
             log.debug("Policy decision for event %s: %s", event, policy_decision)
             if policy_decision:
-                # Create an interjection event and send it to the agent
-                interjection_content = "Apology: I made a mistake. Let's correct it."
+                # Create an interjection event that preserves the original error context
+                original_msg = getattr(event, "content", "") or getattr(event, "prompt", "")
+                interjection_content = f"Apology: I made a mistake. Let's correct it. Original issue: {original_msg}"
                 interjection_event = AgentEvent(
                     role="assistant",
                     content="",
-                    session_id=event.get("session_id", "supervisor"),
+                    session_id=getattr(event, "session_id", "supervisor"),
                     prompt=interjection_content,
                     type="interjection",
                 )
