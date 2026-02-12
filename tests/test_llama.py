@@ -2,6 +2,11 @@ import os
 import json
 import requests
 import pytest
+import os
+import sys
+
+# Ensure the repository root is in sys.path so that the app package can be imported
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from app import config
 
 SERVER_URL = os.getenv("LLAMA_SERVER_URL", "http://localhost:8000")
