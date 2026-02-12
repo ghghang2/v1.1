@@ -4,7 +4,7 @@
 `AgentProcess` uses plain dictionaries for events while the rest of the code imports and expects `AgentEvent` dataclasses. This mismatch can cause runtime errors and hinders type-checking. **Status: ✅ Fixed**
 
 ## 2. AgentProcess sends raw dictionaries
-The outbound queue receives simple dicts, whereas the supervisor expects `AgentEvent` instances. Although the current policy accepts either, the inconsistency is confusing and fragile for future extensions.
+The outbound queue receives simple dicts, whereas the supervisor expects `AgentEvent` instances. Although the current policy accepts either, the inconsistency is confusing and fragile for future extensions. **Status: ✅ Fixed**
 
 ## 3. Generic interjection message
 The policy only signals whether an interjection should occur; the supervisor always replies with a fixed apology string. The specific error context is lost, and the policy's utility is limited.
