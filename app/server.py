@@ -12,14 +12,19 @@ from fastapi.responses import StreamingResponse
 import json
 
 from .llama_client import LlamaClient
-from .db import ChatHistory
+from . import db
 
 app = FastAPI()
 
 llama_client = LlamaClient()
+
+# Simple wrapper around :mod:`app.db` to expose an ``insert`` method
+class ChatHistory:
+    def insert(self, session_id: str, role: str, content: str, *_, **__) -> None:  # noqa: ANN001
+        # ``db.log_message`` expects role and content; other args are ignored
+        db.log_message(session_id, role, content)
+
 chat_history = ChatHistory()
-
-
 @app.post("/chat/{chat_id}")
 async def chat(chat_id: str, request: Request):
     body = await request.json()
