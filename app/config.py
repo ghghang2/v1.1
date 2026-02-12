@@ -6,7 +6,8 @@ from app.tools.repo_overview import func
 # --------------------------------------------------------------------------- #
 #  General settings
 # --------------------------------------------------------------------------- #
-NGROK_URL = "http://localhost:8000"
+# Base URL of the local llama-server.  Historically this was called NGROK_URL
+SERVER_URL = "http://localhost:8000"
 
 MODEL_NAME = "unsloth/gpt-oss-20b-GGUF:F16"
 DEFAULT_SYSTEM_PROMPT = f'''

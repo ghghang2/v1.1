@@ -25,6 +25,10 @@ Each phase contains concrete, incremental tasks and the tools we will use.
 **Deliverables**: Minimal test against `llama-server` passes.
 
 ---
+**Phase 1: Complete**
+---
+
+---
 
 ## Phase 2 – Core Building Blocks
 
@@ -40,9 +44,8 @@ Each phase contains concrete, incremental tasks and the tools we will use.
 - **Goal**: Persist chat history in SQLite.
 - Tasks:
   1. Implement `app/db.py` with `ChatHistory` class.
-  2. Provide `insert(chat_id, role, content)` and `fetch(chat_id)`.
+  2. Provide `insert(session_id, role, content)` and `fetch(session_id)`.
   3. Ensure thread‑safety via connection pooling or `check_same_thread=False`.
-  4. Create migration script or `init_db()` function.
 
 ### 2.3 HTTP Proxy
 - **Goal**: Expose `/chat/{id}` endpoint that forwards to `llama-server`.

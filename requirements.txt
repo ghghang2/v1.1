@@ -1,6 +1,7 @@
 playwright
 requests
 uvicorn
+httpx
 openai
 streamlit
 gitpython
