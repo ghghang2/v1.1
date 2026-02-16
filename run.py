@@ -39,13 +39,19 @@ PORTS = (4040, 8000, 8002)
 def _run(cmd: Iterable[str] | str, *, shell: bool = False,
           cwd: Path | None = None, capture: bool = False,
           env: dict | None = None) -> str | None:
-    """Convenience wrapper around subprocess.run."""
-    env = env or os.environ.copy()
+    """Convenience wrapper around subprocess.run.
+
+    * ``cmd`` may be a string or an iterable of strings.
+    * ``env`` is merged with the current environment rather than replacing it.
+    """
+    env_dict = os.environ.copy()
+    if env is not None:
+        env_dict.update(env)
     result = subprocess.run(
         cmd,
         shell=shell,
         cwd=cwd,
-        env=env,
+        env=env_dict,
         check=True,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.STDOUT,
@@ -54,16 +60,21 @@ def _run(cmd: Iterable[str] | str, *, shell: bool = False,
     return result.stdout.strip() if capture else None
 
 def _is_port_free(port: int) -> bool:
-    """Return True if the port is not currently bound."""
-    with subprocess.Popen(["ss", "-tuln"], stdout=subprocess.PIPE) as p:
-        return str(port) not in p.stdout.read().decode()
+    """Return True if the port is not currently bound.
+
+    Uses ``psutil`` to inspect active sockets, which works on all platforms.
+    """
+    for conn in psutil.net_connections(kind="inet"):
+        if conn.laddr.port == port:
+            return False
+    return True
 
 def _wait_for(url: str, *, timeout: int = 30, interval: float = 1.0) -> bool:
     """Poll a URL until it returns 200 or timeout expires."""
     for _ in range(int(timeout / interval)):
         try:
             with urllib.request.urlopen(url, timeout=5) as r:
-                return r.status == 200
+                return r.getcode() == 200
         except Exception:
             pass
         time.sleep(interval)
@@ -197,6 +208,31 @@ tunnels:
 
     print("\nALL SERVICES RUNNING SUCCESSFULLY!")
     print("=" * 70)
+
+
+if __name__ == "__main__":
+    # Simple command‑line handling for --status and --stop
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+        if arg == "--status":
+            if SERVICE_INFO.exists():
+                print(SERVICE_INFO.read_text())
+            else:
+                print("No service info found.")
+        elif arg == "--stop":
+            if SERVICE_INFO.exists():
+                info = json.loads(SERVICE_INFO.read_text())
+                for pid in (info.get("llama_server_pid"), info.get("streamlit_pid"), info.get("ngrok_pid")):
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                SERVICE_INFO.unlink()
+                print("Services stopped.")
+            else:
+                print("No service info found.")
+            sys.exit(0)
+    main()
 
 # --------------------------------------------------------------------------- #
 #  Helper commands – status and stop
