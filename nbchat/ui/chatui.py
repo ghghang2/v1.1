@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import markdown  # for markdown rendering
 from IPython.display import display
 
+from nbchat.ui import styles
 from nbchat.core.utils import lazy_import, md_to_html
 
 class ChatUI:
@@ -194,18 +195,9 @@ class ChatUI:
                 try:
                     full_msg = json.loads(tool_args)
                     reasoning = full_msg.get("reasoning_content", "")
-                    content = full_msg.get("content", "")
+                    msg_content = full_msg.get("content", "")
                     tool_calls = full_msg.get("tool_calls", [])
-                    html = f'<div style="background-color: #f1f8e9; padding: 0px; border-radius: 8px; margin: 0;">'
-                    if reasoning:
-                        html += f'<details><summary><b>Reasoning</b></summary>{md_to_html(reasoning)}</details>'
-                    if tool_calls:
-                        tool_summary = ", ".join([tc["function"]["name"] for tc in tool_calls])
-                        html += f'<details><summary>Tool calls: {tool_summary}</summary>'
-                        for tc in tool_calls:
-                            html += f'<b>{tc["function"]["name"]}</b>: <code>{tc["function"]["arguments"]}</code><br>'
-                        html += '</details>'
-                    html += f'<b>Assistant:</b> {md_to_html(content)}</div>'
+                    html = styles.assistant_full_html(reasoning, msg_content, tool_calls)
                     children.append(widgets.HTML(value=html, layout=widgets.Layout(width="100%", margin="0")))
                 except:
                     children.append(self._render_assistant_message(content, "", "", ""))
@@ -214,68 +206,36 @@ class ChatUI:
         self.chat_history.children = children
 
     def _render_user_message(self, content: str) -> widgets.HTML:
-        return widgets.HTML(
-            value=f'<div style="background-color: #e3f2fd; padding: 0px; border-radius: 5px; margin: 0;"><b>User:</b> {md_to_html(content)}</div>',
-            layout=widgets.Layout(width="100%", margin="0")
-        )
+        return styles.create_user_widget(content)
 
     def _render_analysis_message(self, content: str) -> widgets.HTML:
-        return widgets.HTML(
-            value=f'''
-            <div style="background-color: #fff3e0; padding: 0px; border-radius: 0px; margin: 0;">
-                <details open>
-                    <summary><b>Reasoning</b></summary>
-                    {md_to_html(content)}
-                </details>
-            </div>
-            ''',
-            layout=widgets.Layout(width="100%", margin="0")
-        )
+
+        return styles.create_reasoning_widget(content)
 
     def _render_assistant_message(self, content: str, tool_id: str, tool_name: str, tool_args: str) -> widgets.HTML:
+
         if tool_id == "multiple":
+
             try:
+
                 tool_calls = json.loads(tool_args)
-                tool_summary = ", ".join([tc.get("name", "unknown") for tc in tool_calls])
-                details = "<br>".join([f"<b>{tc.get('name')}</b>: <code>{tc.get('args', {})}</code>" for tc in tool_calls])
-                html = f'''
-                <div style="background-color: #f1f8e9; padding: 0px; border-radius: 5px; margin: 0;">
-                    <b>Assistant:</b> {md_to_html(content)}<br>
-                    <details>
-                        <summary>Tool calls: {tool_summary}</summary>
-                        {details}
-                    </details>
-                </div>
-                '''
+
+                return styles.create_assistant_with_tools_widget(content, tool_calls)
+
             except:
-                html = f'<div style="background-color: #f1f8e9; padding: 0px; border-radius: 5px; margin: 0;"><b>Assistant:</b> {md_to_html(content)}</div>'
+
+                return styles.create_assistant_widget(content)
+
         elif tool_id:
-            html = f'''
-            <div style="background-color: #f1f8e9; padding: 0px; border-radius: 5px; margin: 0;">
-                <b>Assistant:</b> {md_to_html(content)}<br>
-                <details>
-                    <summary>Tool call: {tool_name}</summary>
-                    Arguments: <code>{tool_args}</code>
-                </details>
-            </div>
-            '''
+
+            return styles.create_assistant_with_single_tool_widget(content, tool_name, tool_args)
+
         else:
-            html = f'<div style="background-color: #f1f8e9; padding: 0px; border-radius: 5px; margin: 0;"><b>Assistant:</b> {md_to_html(content)}</div>'
-        return widgets.HTML(value=html, layout=widgets.Layout(width="100%", margin="2px 0"))
+
+            return styles.create_assistant_widget(content)
 
     def _render_tool_message(self, content: str, tool_id: str, tool_name: str, tool_args: str) -> widgets.HTML:
-        preview = content[:50] + ("..." if len(content) > 50 else "")
-        return widgets.HTML(
-            value=f'''
-            <div style="background-color: #fce4ec; padding: 0px; border-radius: 5px; margin: 0;">
-                <details>
-                    <summary><b>Tool result ({tool_name})</b>: {preview}</summary>
-                    <pre style="white-space: pre-wrap; word-wrap: break-word;">{content}</pre>
-                </details>
-            </div>
-            ''',
-            layout=widgets.Layout(width="100%", margin="0")
-        )
+        return styles.create_tool_widget(content, tool_name)
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -437,27 +397,19 @@ class ChatUI:
             if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                 if reasoning_placeholder is None:
                     reasoning_placeholder = widgets.HTML(
-                        value='<div style="background-color: #fff3e0; padding: 0px; border-radius: 5px; margin: 0;"><details open><summary><b>Reasoning</b></summary></div>',
+                        value=styles.reasoning_placeholder_html(),
                         layout=widgets.Layout(width="100%", margin="0")
                     )
                     self.chat_history.children = list(self.chat_history.children) + [reasoning_placeholder]
                 reasoning_accum += delta.reasoning_content
-                reasoning_placeholder.value = f'''
-                <div style="background-color: #fff3e0; padding: 0px; border-radius: 5px; margin: 0;">
-                    <details open>
-                        <summary><b>Reasoning</b></summary>
-                        {md_to_html(reasoning_accum)}
-                    </details>
-                </div>
-                '''
+                reasoning_placeholder.value = styles.reasoning_html_with_content(reasoning_accum)
 
             # Assistant content
             if delta.content:
                 if assistant_placeholder is None:
                     assistant_placeholder = widgets.HTML(
-                        value='<div style="background-color: #f1f8e9; padding: 0px; border-radius: 5px; margin: 0;"><b>Assistant:</b> </div>',
-                        layout=widgets.Layout(width="100%", margin="0")
-                    )
+                        value=styles.assistant_placeholder_html(),
+                        layout=widgets.Layout(width="100%", margin="0"))
                     # Insert after reasoning if it exists
                     children = list(self.chat_history.children)
                     if reasoning_placeholder is not None and reasoning_placeholder in children:
@@ -467,11 +419,7 @@ class ChatUI:
                         children.append(assistant_placeholder)
                     self.chat_history.children = children
                 content_accum += delta.content
-                assistant_placeholder.value = f'''
-                <div style="background-color: #f1f8e9; padding: 0px; border-radius: 5px; margin: 0;">
-                    <b>Assistant:</b> {md_to_html(content_accum)}
-                </div>
-                '''
+                assistant_placeholder.value = styles.assistant_html_with_content(content_accum)
 
             # Tool calls
             if delta.tool_calls:

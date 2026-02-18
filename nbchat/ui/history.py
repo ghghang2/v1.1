@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import List, Tuple
 
 import ipywidgets as widgets
+from nbchat.ui import styles
 from nbchat.core import db as _db
 from nbchat.core.utils import md_to_html
 
@@ -29,17 +30,11 @@ def load_history(session_id: str) -> List[Tuple[str, str, str, str, str]]:
 
 # ----------------------------------------------------------------------
 def _render_user_message(content: str) -> widgets.HTML:
-    return widgets.HTML(
-        value=f'<div style="background-color: #e3f2fd; padding: 0px; border-radius: 5px; margin: 0;">{md_to_html(content)}</div>',
-        layout=widgets.Layout(width="100%", margin="0"),
-    )
+    return styles.create_user_widget(content)
 
 
 def _render_assistant_message(content: str) -> widgets.HTML:
-    return widgets.HTML(
-        value=f'<div style="background-color: #f1f8e9; padding: 0px; border-radius: 5px; margin: 0;">{md_to_html(content)}</div>',
-        layout=widgets.Layout(width="100%", margin="0"),
-    )
+    return styles.create_assistant_widget(content)
 
 
 def render_history(history: List[Tuple[str, str, str, str, str]]) -> List[widgets.Widget]:
