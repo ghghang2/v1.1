@@ -34,7 +34,7 @@ def lazy_import(module_name: str):
             from nbchat.core.client import get_client
             _client = get_client
         return _client()
-    elif module_name == "nbchat.core.tools":
+    elif module_name == "nbchat.tools":
         if _tools is None:
             from nbchat.tools import get_tools
             _tools = get_tools
