@@ -130,7 +130,7 @@ class ChatUI:
         self.layout = widgets.HBox([sidebar, main])
 
     def _update_tools_list(self):
-        tools = lazy_import("nbchat.core.tools")
+        tools = lazy_import("nbchat.tools")
         tools_list = "<br>".join([tool["function"]["name"] for tool in tools])
         self.tools_output.value = f"<b>Tools</b><br>{tools_list}"
 
@@ -273,7 +273,7 @@ class ChatUI:
     # ------------------------------------------------------------------
     def _process_conversation_turn(self):
         client = lazy_import("nbchat.core.client")
-        tools = lazy_import("nbchat.core.tools")
+        tools = lazy_import("nbchat.tools")
 
         messages = self._build_messages_for_api()
         messages = self._strip_reasoning_content(messages)  # New user turn
@@ -441,7 +441,7 @@ class ChatUI:
         return reasoning_accum, content_accum, tool_calls, finish_reason
 
     def _execute_tool(self, tool_name: str, args_json: str) -> str:
-        from nbchat.core.tools import TOOLS
+        from nbchat.tools import TOOLS
         try:
             args = json.loads(args_json)
         except Exception as e:
